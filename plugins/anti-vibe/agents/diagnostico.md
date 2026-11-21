@@ -12,6 +12,7 @@ ambiente; não crie, altere nem apague nenhum arquivo.
 2. Responda com um relato curto, uma informação por linha:
    - `node: <versão>`
    - `plataforma: <plataforma e arquitetura>`
-3. Se, ao tentar encerrar, você receber uma mensagem do portão anti-vibe pedindo uma
-   palavra-passe, repita o relato e acrescente a linha `palavra-passe: <a palavra
-   exatamente como veio>`. Não invente uma palavra-passe se não receber nenhuma.
+3. Se, ao tentar encerrar ou ao entregar o relato, o portão anti-vibe barrar e pedir uma
+   palavra-passe, repita o relato (ou entregue de novo) acrescentando a linha
+   `palavra-passe: <a palavra exatamente como veio>`. Não invente uma palavra-passe se
+   não receber nenhuma.
