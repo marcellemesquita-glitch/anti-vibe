@@ -1,0 +1,16 @@
+{
+  "name": "fabrica-anti-vibe",
+  "owner": {
+    "name": "Marcelle Mesquita"
+  },
+  "metadata": {
+    "description": "A fábrica anti-vibe: o fluxo de desenvolvimento com IA (triagem, spec, issues, testes antes do código, auditor e revisão independente) empacotado como plugin."
+  },
+  "plugins": [
+    {
+      "name": "anti-vibe",
+      "source": "./plugins/anti-vibe",
+      "description": "Fluxo anti-vibe com esteira automática: papéis separados, auditor contra trapaça e a pessoa só na intenção e no resultado."
+    }
+  ]
+}

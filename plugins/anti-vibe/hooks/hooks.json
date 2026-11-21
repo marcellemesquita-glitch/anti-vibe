@@ -1,0 +1,30 @@
+{
+  "description": "Ganchos do anti-vibe: regras no início da sessão e portão de conclusão.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/sessao.mjs"],
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "^anti-vibe:diagnostico$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/portao.mjs"],
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

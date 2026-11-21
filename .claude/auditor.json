@@ -1,0 +1,11 @@
+{
+  "pastaIssues": "caderno/pre-desenvolvimento/issues",
+  "pastaSpecs": "caderno/pre-desenvolvimento",
+  "pastaSpecsArquivadas": "caderno/docs/specs-arquivadas",
+  "arquivoLicoes": "caderno/pre-desenvolvimento/licoes.md",
+  "pastasTestes": ["testes"],
+  "sufixosTeste": [".test.mjs"],
+  "comandoTeste": "npx vitest run {arquivos} --reporter=json --outputFile={saida}",
+  "aprovadores": ["Marcelle"],
+  "foraDoEscopo": ["caderno/**"]
+}

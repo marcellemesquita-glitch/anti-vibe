@@ -1,0 +1,9 @@
+{
+  "name": "anti-vibe",
+  "version": "0.1.0",
+  "description": "Fluxo anti-vibe com esteira automática: triagem, spec, issues, testes antes do código, auditor contra trapaça e revisão independente.",
+  "author": {
+    "name": "Marcelle Mesquita"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "workflow-anti-vibe",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.1"
+  }
+}
