@@ -1,0 +1,18 @@
+[
+  {
+    "id": "segredo-no-frontend",
+    "nome": "segredo ou chave de servidor em arquivo que roda no navegador",
+    "origem": "regras sempre ativas, regra 5: nunca exponha chaves de API ou secrets no frontend",
+    "tipo": "conteudo",
+    "arquivos": [
+      "**/*.{ts,tsx,js,jsx}"
+    ],
+    "excluir": [
+      "**/*.test.{ts,tsx,js,jsx}",
+      "**/*.spec.{ts,tsx,js,jsx}"
+    ],
+    "somenteSe": "^\\s*['\"]use client['\"]",
+    "padrao": "process\\.env\\.(?!NEXT_PUBLIC_|NODE_ENV\\b)\\w+|SERVICE_ROLE_KEY|_SECRET\\b",
+    "oQueFazer": "leve a leitura do segredo para o servidor"
+  }
+]
