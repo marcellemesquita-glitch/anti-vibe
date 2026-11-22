@@ -7,6 +7,7 @@
 //
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" issue <id|caminho> [--sem-rodar] [--json]
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" serie <série> [--sem-rodar] [--json]
+//   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" iniciar <id|caminho>
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" antes <id|caminho> [--json]
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" suposicoes
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" confirmar <id> <CA-...> --por <nome> [--dia dd/mm/aaaa]
@@ -445,7 +446,7 @@ export function lerTestes(texto) {
   return { testes, preparacao, marcacoes }
 }
 
-function eArquivoDeTeste(rel, cfg) {
+export function eArquivoDeTeste(rel, cfg) {
   return cfg.pastasTestes.some((p) => rel.startsWith(`${p}/`)) && cfg.sufixosTeste.some((s) => rel.endsWith(s))
 }
 
@@ -913,7 +914,7 @@ function conferirTrapaca({ raiz, cfg, issue, caminho, problemas }) {
 // Configuração de testes, do CI e do auditor. A lista padrão vale sempre (o projeto
 // acrescenta, não tira) e a do auditor nunca é configurável: mudar a configuração do
 // auditor poderia tirá-la da conferência ou esconder o resto.
-function eConfigDeTeste(arquivo, cfg) {
+export function eConfigDeTeste(arquivo, cfg) {
   return CONFIG_DO_AUDITOR.includes(arquivo) || casa(CONFIG_PADRAO.configDeTeste, arquivo) || casa(cfg.configDeTeste, arquivo)
 }
 
@@ -1413,11 +1414,40 @@ export function registrarAntes(raiz, cfg, caminho) {
   return rel
 }
 
-// Decisão do portão sobre o fim do executor: { libera, mensagem }. Sem issue ativa,
-// libera. Se não der para conferir (configuração ilegível, issue sumida), conta como
-// reprovação: o portão não libera por falha de conferência. Só libera sem conferir se
-// nem o contador der para gravar, para nunca prender o agente para sempre.
-export function conferirNoPortao(raiz) {
+// Começo do trabalho numa issue: ela vira a ativa do portão, com a contagem zerada e
+// sem registro `antes` (quem o faz é o portão do escritor de testes).
+export function iniciarIssue(raiz, caminho) {
+  const id = idDaIssue(caminho)
+  if (!id) return { erro: `o nome do arquivo da issue não começa pelo identificador (ex.: S1-01-...): ${path.basename(caminho)}` }
+  const registro = lerRegistro(raiz)
+  registro.ativa = id
+  registro.issues[id] = { tentativas: 0, precisaDecisao: false }
+  gravarJson(arquivoDoRegistro(raiz), registro)
+  return { issue: id }
+}
+
+// Fim do escritor de testes: roda o `antes`; passa se há teste para cada critério
+// automático e todos falham.
+function travasDoEscritor(raiz, cfg, caminho) {
+  const rel = registrarAntes(raiz, cfg, caminho)
+  if (rel.erro) return [problema('PORTAO_SEM_CONFERENCIA', path.basename(caminho), rel.erro, 'renomeie a issue com o identificador na frente')]
+  return [
+    ...rel.semTeste.map((c) => problema('CRITERIO_SEM_TESTE', c, 'o critério automático não tem teste', `escreva um teste com "${c}" no nome do it/test`)),
+    ...rel.passaram.map((c) =>
+      problema('TESTE_NUNCA_FALHOU', c, 'o teste já passa sem o código: ele não prova o critério', 'reescreva o teste para conferir o "Então" do critério')
+    ),
+    ...rel.naoRodaram.map((c) =>
+      problema('PORTAO_SEM_CONFERENCIA', c, `o comando de teste não rodou:\n${rel.erroDosTestes || ''}`, 'corrija a execução dos testes')
+    ),
+  ]
+}
+
+// Decisão do portão sobre o fim do executor ou do escritor de testes: { libera,
+// mensagem }. Sem issue ativa, libera. Se não der para conferir (configuração
+// ilegível, issue sumida), conta como reprovação: o portão não libera por falha de
+// conferência. Só libera sem conferir se nem o contador der para gravar, para nunca
+// prender o agente para sempre.
+export function conferirNoPortao(raiz, papel = 'executor') {
   const registro = lerRegistro(raiz)
   const id = registro.ativa
   if (!id) return { libera: true }
@@ -1433,6 +1463,19 @@ export function conferirNoPortao(raiz) {
     const caminho = acharIssue(raiz, cfg, id)
     if (!caminho) {
       travas = [problema('PORTAO_SEM_CONFERENCIA', id, `a issue ativa não foi encontrada em ${cfg.pastaIssues}`, 'devolva o arquivo da issue ao lugar')]
+    } else if (papel === 'escritor') {
+      travas = travasDoEscritor(raiz, cfg, caminho)
+    } else if (!estado.antes && lerIssue(caminho).criterios.some((c) => c.prova === 'automatica')) {
+      // Sem critério automático (só manual, protótipo, formato antigo) não há teste a
+      // registrar falhando.
+      travas = [
+        problema(
+          'FALHA_ANTES_NAO_REGISTRADA',
+          id,
+          'os testes não foram registrados falhando antes da implementação',
+          `os testes vêm do escritor de testes, cujo portão roda o antes; à mão: antes ${id}`
+        ),
+      ]
     } else {
       const rel = executarIssue(raiz, cfg, caminho)
       registrarSinais(raiz, rel)
@@ -1444,28 +1487,33 @@ export function conferirNoPortao(raiz) {
   }
   if (travas.length === 0) return { libera: true }
 
-  estado.tentativas = (estado.tentativas || 0) + 1
-  if (estado.tentativas >= limite) estado.precisaDecisao = true
-  registro.issues[id] = estado
+  // O `antes` do escritor regrava o estado da issue: a contagem parte da de antes dele.
+  const atual = lerRegistro(raiz)
+  const novo = { ...(atual.issues[id] || estado), tentativas: (estado.tentativas || 0) + 1 }
+  novo.precisaDecisao = novo.tentativas >= limite
+  atual.ativa = id
+  atual.issues[id] = novo
   try {
-    gravarJson(arquivoDoRegistro(raiz), registro)
+    gravarJson(arquivoDoRegistro(raiz), atual)
   } catch (erro) {
     return { libera: true, mensagem: `Portão anti-vibe: não deu para gravar o contador de tentativas (${erro.message}); confira a issue ${id} à mão.` }
   }
   const lista = travas.map((p) => `- ${p.nome} (${p.codigo}) — ${p.alvo}: ${p.detalhe}\n  o que fazer: ${p.oQueFazer}`).join('\n')
-  if (estado.precisaDecisao) {
+  if (novo.precisaDecisao) {
     return {
       libera: true,
       mensagem:
-        `Portão anti-vibe: a issue ${id} foi reprovada ${estado.tentativas} vezes, o limite. ` +
+        `Portão anti-vibe: a issue ${id} foi reprovada ${novo.tentativas} vezes, o limite. ` +
         `Pare: ela precisa de decisão humana. Apresente à pessoa o que falta, do mais grave ao menos grave:\n${lista}`,
     }
   }
+  const oQue = papel === 'escritor' ? 'os testes da issue ainda não estão prontos' : 'a issue ainda não está alinhada'
+  const como = papel === 'escritor' ? 'sem escrever código que não seja de teste' : 'sem mexer em teste nem na issue'
   return {
     libera: false,
     mensagem:
-      `Portão anti-vibe: a issue ${id} ainda não está alinhada (tentativa ${estado.tentativas} de ${limite}). ` +
-      `Não encerre: corrija o que falta, sem mexer em teste nem na issue, e tente de novo.\n${lista}`,
+      `Portão anti-vibe: ${oQue} (${id}, tentativa ${novo.tentativas} de ${limite}). ` +
+      `Não encerre: corrija o que falta, ${como}, e tente de novo.\n${lista}`,
   }
 }
 
@@ -1649,6 +1697,16 @@ export function principal(args, raiz = process.cwd()) {
     }
     console.log(`\nVeredito da série: ${rel.veredito}`)
     return rel.saida
+  }
+
+  if (comando === 'iniciar') {
+    if (!posicionais[0]) return erroDeUso('diga qual issue')
+    const caminho = acharIssue(raiz, cfg, posicionais[0])
+    if (!caminho) return erroDeUso(`issue "${posicionais[0]}" não encontrada em ${cfg.pastaIssues}`)
+    const rel = iniciarIssue(raiz, caminho)
+    if (rel.erro) return erroDeUso(rel.erro)
+    console.log(`${rel.issue} é agora a issue ativa do portão (contagem de tentativas zerada).`)
+    return SAIDA.ALINHADA
   }
 
   if (comando === 'antes') {

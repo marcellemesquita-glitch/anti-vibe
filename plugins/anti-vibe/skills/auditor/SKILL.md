@@ -1,7 +1,7 @@
 ---
 name: auditor
 description: Roda o auditor do fluxo com prova — o conferidor mecânico que diz se uma issue ou uma série está alinhada (cada critério de aceite tem teste com o código dele e o teste passou, suposições e perguntas fechadas, seções presentes, escopo e regras por script). Use quando a pessoa pedir para auditar uma issue ou série, perguntar "qual critério não tem teste?", "o que estamos assumindo?", "o que falta de teste manual?", ou quiser registrar que um teste manual foi feito.
-argument-hint: issue <id> | serie <série> | antes <id> | suposicoes | regras | licao ... | confirmar <id> <CA-...> --por <nome>
+argument-hint: issue <id> | serie <série> | iniciar <id> | antes <id> | suposicoes | regras | licao ... | confirmar <id> <CA-...> --por <nome>
 ---
 
 # Auditor — a prova que não depende de leitura
@@ -18,6 +18,7 @@ ambiente:
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" issue <id|caminho> [--sem-rodar] [--json]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" serie <série> [--sem-rodar] [--json]
+node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" iniciar <id|caminho>
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" antes <id|caminho> [--json]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" suposicoes
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" regras
@@ -108,6 +109,8 @@ sinais, confirmações, registro) fica no projeto, nunca no plugin.
 
 ## Antes do código e portão de conclusão
 
+- **`iniciar <id>`** marca a issue como a **ativa** do portão, com a contagem de
+  tentativas zerada. A skill `issue` o roda antes do planejador.
 - **`antes <id>`** roda logo depois de escrever os testes e antes de implementar. Ele
   registra, por critério, se o teste falhou (o certo), já passava ou não existe, e guarda a
   impressão de todos os testes do projeto. Também torna a issue a **ativa** do portão e
@@ -115,8 +118,10 @@ sinais, confirmações, registro) fica no projeto, nunca no plugin.
 - Depois dele, o auditor acusa o teste que já passava antes (`TESTE_NUNCA_FALHOU`) e
   qualquer teste mudado desde o registro (`TESTE_ALTERADO`). Sem registro `antes` da
   issue, essas duas conferências não se aplicam.
-- **O portão**, ligado ao fim do agente executor, roda o auditor sobre a issue ativa. Com
-  problema que trava, ele impede o encerramento e devolve a lista do que falta. Cada
+- **O portão** vigia o fim de dois agentes do plugin. No **escritor de testes**, ele roda
+  o `antes` e barra enquanto faltar teste para um critério automático ou algum teste já
+  passar. No **executor**, ele roda o auditor sobre a issue ativa (e reprova se não houver
+  `antes`); com problema que trava, impede o encerramento e devolve a lista do que falta. Cada
   reprovação conta uma tentativa; no limite (`limiteDeTentativas`), ele deixa parar com o
   aviso de que a issue precisa de decisão humana. Rodar o auditor à mão não conta
   tentativa.

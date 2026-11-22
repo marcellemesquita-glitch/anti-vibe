@@ -5,22 +5,26 @@
 // - chamando a ferramenta SubagentHandback (o Claude Code usa esse caminho no modo
 //   automático de permissões) → gancho PreToolUse (nega a chamada).
 //
-// Dois agentes passam por aqui:
+// Três agentes passam por aqui:
 // - o de diagnóstico: na primeira tentativa de encerrar, o portão barra e entrega uma
 //   palavra-passe que só ele conhece; o agente é obrigado a continuar e devolvê-la, o que
 //   prova que o bloqueio funciona no ambiente. Na segunda tentativa, libera sempre.
-// - o executor: o portão roda o auditor sobre a issue ativa (a do último `antes`) e barra
-//   enquanto houver problema, devolvendo a lista do que falta. O auditor conta as
-//   reprovações; no limite, o portão libera com o aviso de que a issue precisa de decisão
-//   humana.
+// - o escritor de testes: o portão roda o `antes` da issue ativa e barra enquanto faltar
+//   teste para um critério automático ou algum teste já passar sem o código;
+// - o executor: o portão roda o auditor sobre a issue ativa e barra enquanto houver
+//   problema, devolvendo a lista do que falta.
+// O auditor conta as reprovações; no limite, o portão libera com o aviso de que a issue
+// precisa de decisão humana.
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { chamadoDireto, lerEntrada } from './comum.mjs'
 
 export const AGENTE_DIAGNOSTICO = 'anti-vibe:diagnostico'
 export const AGENTE_EXECUTOR = 'anti-vibe:executor'
+export const AGENTE_ESCRITOR = 'anti-vibe:escritor-de-testes'
 
 const raizDoPlugin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -39,14 +43,16 @@ function resposta(entrada, { libera, mensagem }) {
   return { codigo: 2, stderr: mensagem }
 }
 
-// Fim do executor: o auditor decide. Erro ao conferir não prende o agente, mas avisa.
-export async function decidirExecutor(entrada) {
+// Fim do executor ou do escritor de testes: o auditor decide. Erro ao carregar o
+// auditor não prende o agente, mas avisa.
+export async function decidirPapel(entrada) {
   if (entrada.hook_event_name === 'PreToolUse' && entrada.tool_name !== 'SubagentHandback') return { codigo: 0 }
   // A pasta do projeto vem antes da pasta atual do agente, que ele pode ter mudado.
   const raiz = process.env.CLAUDE_PROJECT_DIR || entrada.cwd || process.cwd()
   try {
     const auditor = await import(pathToFileURL(path.join(raizDoPlugin, 'auditor', 'auditor.mjs')).href)
-    return resposta(entrada, auditor.conferirNoPortao(raiz))
+    const papel = entrada.agent_type === AGENTE_ESCRITOR ? 'escritor' : 'executor'
+    return resposta(entrada, auditor.conferirNoPortao(raiz, papel))
   } catch (erro) {
     return resposta(entrada, { libera: true, mensagem: `Portão anti-vibe: não deu para rodar o auditor (${erro.message}).` })
   }
@@ -101,35 +107,11 @@ function marcaDe(idDoAgente) {
   return path.join(os.tmpdir(), `anti-vibe-portao-${nome}`)
 }
 
-function lerEntrada() {
-  return new Promise((resolve) => {
-    let dados = ''
-    process.stdin.setEncoding('utf8')
-    process.stdin.on('data', (pedaco) => (dados += pedaco))
-    process.stdin.on('end', () => {
-      try {
-        resolve(JSON.parse(dados || '{}'))
-      } catch {
-        resolve({})
-      }
-    })
-  })
-}
-
-function chamadoDireto() {
-  if (!process.argv[1]) return false
-  try {
-    return fs.realpathSync.native(process.argv[1]) === fs.realpathSync.native(fileURLToPath(import.meta.url))
-  } catch {
-    return false
-  }
-}
-
-if (chamadoDireto()) {
+if (chamadoDireto(import.meta.url)) {
   const entrada = await lerEntrada()
   let decisao
-  if (entrada.agent_type === AGENTE_EXECUTOR) {
-    decisao = await decidirExecutor(entrada)
+  if (entrada.agent_type === AGENTE_EXECUTOR || entrada.agent_type === AGENTE_ESCRITOR) {
+    decisao = await decidirPapel(entrada)
   } else {
     const marca = marcaDe(entrada.agent_id)
     decisao = decidir(entrada, fs.existsSync(marca))

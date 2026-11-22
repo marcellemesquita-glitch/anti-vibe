@@ -49,23 +49,26 @@ O significado de cada problema e de cada veredito está na skill `anti-vibe:audi
 ### 3. Revisor independente: o que o script não enxerga
 
 Quem implementou não revisa o próprio código: a sessão que escreveu tende a confirmar o
-que já acredita. Por isso esta leitura é feita por um **subagente limpo**, despachado com
-a ferramenta de agentes (tipo `Explore` ou outro só de leitura), que recebe apenas:
+que já acredita. Por isso esta leitura é feita por um **subagente limpo**: despache, com
+a ferramenta de agentes, o agente **`anti-vibe:revisor`** do plugin (só lê; a lista do que
+ele procura e o formato da resposta já estão na definição dele). Passe a ele apenas:
 
 1. o caminho do arquivo da issue;
-2. o `git diff HEAD` dos arquivos listados na seção Arquivos da issue (gere com
-   `git diff HEAD -- <arquivos>`; para arquivo novo, o conteúdo inteiro);
-3. a instrução de ler o `AGENTS.md` da raiz (ou, na falta dele, o `CLAUDE.md`);
-4. a lista dos quatro problemas abaixo e o formato de resposta em blocos (seção "Formato
-   da resposta", parte "Se houver problemas").
+2. as mudanças: o `git diff HEAD` dos arquivos listados na seção Arquivos da issue (gere
+   com `git diff HEAD -- <arquivos>`; para arquivo novo, o conteúdo inteiro);
+3. a página de princípios: a instrução de ler o `AGENTS.md` da raiz (ou, na falta dele, o
+   `CLAUDE.md`).
 
-**Não passe** ao subagente o seu raciocínio, o que você acha que está certo nem o
-histórico da conversa. Ele responde só com os problemas encontrados, um bloco por
-problema, ou com a frase "Nenhum problema por leitura". Você copia a resposta dele na
-revisão, sem suavizar.
+**Não passe** ao revisor o seu raciocínio, o que você acha que está certo nem a conversa
+de quem implementou. Ele responde só com os problemas encontrados, um bloco por problema,
+ou com a frase "Nenhum problema por leitura". Você copia a resposta dele na revisão, sem
+suavizar.
 
-Se a ferramenta de agentes não estiver disponível, faça a leitura você mesmo e escreva
-no resultado: "Leitura feita na mesma sessão que implementou, sem revisor independente."
+Se o agente `anti-vibe:revisor` não estiver disponível, despache outro subagente só de
+leitura (como `Explore`) com as mesmas três coisas, mais a lista dos quatro problemas
+abaixo e o formato de resposta em blocos. Sem ferramenta de agentes, faça a leitura você
+mesmo e escreva no resultado: "Leitura feita na mesma sessão que implementou, sem revisor
+independente."
 
 O revisor procura **somente**:
 

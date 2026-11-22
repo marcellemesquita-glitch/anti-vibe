@@ -1,5 +1,5 @@
 {
-  "description": "Ganchos do anti-vibe: regras e estado do trabalho no início da sessão; portão de conclusão do diagnóstico e do executor.",
+  "description": "Ganchos do anti-vibe: regras e estado do trabalho no início da sessão; papéis (o que cada agente pode editar); portão de conclusão do diagnóstico, do escritor de testes e do executor.",
   "hooks": {
     "SessionStart": [
       {
@@ -28,11 +28,24 @@
             "timeout": 600
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/papeis.mjs"
+            ],
+            "timeout": 30
+          }
+        ]
       }
     ],
     "SubagentStop": [
       {
-        "matcher": "^anti-vibe:(diagnostico|executor)$",
+        "matcher": "^anti-vibe:(diagnostico|escritor-de-testes|executor)$",
         "hooks": [
           {
             "type": "command",
