@@ -133,10 +133,20 @@ describe('P1-02 — Etapas do fluxo como skills do plugin', () => {
       for (const re of proibidos) if (re.test(texto)) achados.push(`${rel(arquivo)}: ${re}`)
 
       // Toda menção ao script do auditor em texto de skill, agente ou gancho vem do plugin.
+      // Em código .mjs do plugin vale também o caminho montado a partir da pasta do
+      // plugin (SUP-P1-38): `path.join(raizDoPlugin, 'auditor', 'auditor.mjs')`, com
+      // raizDoPlugin calculada a partir do próprio arquivo, uma pasta acima.
       if (!arquivo.endsWith('auditor.mjs')) {
+        const raizDoPluginNoCodigo =
+          arquivo.endsWith('.mjs') &&
+          path.dirname(path.dirname(arquivo)) === PLUGIN &&
+          texto.includes("const raizDoPlugin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')")
         for (const m of texto.matchAll(/(\S*)auditor\.mjs/g)) {
-          if (!m[1].endsWith('${CLAUDE_PLUGIN_ROOT}/auditor/')) achados.push(`${rel(arquivo)}: ${m[0]}`)
-          else chamadas.push(m[0])
+          const montadoDoPlugin =
+            raizDoPluginNoCodigo &&
+            texto.slice(Math.max(0, m.index - 40), m.index + m[0].length + 2).includes("path.join(raizDoPlugin, 'auditor', 'auditor.mjs')")
+          if (m[1].endsWith('${CLAUDE_PLUGIN_ROOT}/auditor/') || montadoDoPlugin) chamadas.push(m[0])
+          else achados.push(`${rel(arquivo)}: ${m[0]}`)
         }
       }
       // Todo script chamado com `node` nas instruções sai da pasta do plugin.

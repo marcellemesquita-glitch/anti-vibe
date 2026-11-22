@@ -209,6 +209,7 @@ export function lerSpec(caminho) {
   }
   return {
     caminho,
+    titulo: (/^#\s+(.+)$/m.exec(texto) || [])[1] || path.basename(caminho),
     serie: ((/^>\s*s[ée]rie:\s*([A-Za-z0-9]+)/m.exec(texto) || [])[1] || '').toUpperCase() || null,
     criterios,
     suposicoes: registros(secao(texto, 'Suposições'), 'SUP'),
@@ -226,12 +227,16 @@ function arquivosMd(pasta) {
     .map((e) => path.join(pasta, e.name))
 }
 
+// Arquivos de spec (spec*.md) de uma pasta.
+export function listarSpecs(pasta) {
+  return arquivosMd(pasta).filter((a) => path.basename(a).startsWith('spec'))
+}
+
 // Spec da série: em andamento ou já arquivada.
 export function acharSpec(raiz, cfg, serie) {
   const pastas = [cfg.pastaSpecs, cfg.pastaSpecsArquivadas].map((p) => path.join(raiz, p))
   for (const pasta of pastas) {
-    for (const arquivo of arquivosMd(pasta)) {
-      if (!path.basename(arquivo).startsWith('spec')) continue
+    for (const arquivo of listarSpecs(pasta)) {
       const spec = lerSpec(arquivo)
       if (spec.serie === serie) return spec
     }
@@ -812,8 +817,7 @@ export function executarSerie(raiz, cfg, serie, { semRodar = false } = {}) {
 
 // Suposições e perguntas abertas das specs em andamento e das issues abertas.
 export function listarAbertas(raiz, cfg) {
-  const fontes = arquivosMd(path.join(raiz, cfg.pastaSpecs))
-    .filter((a) => path.basename(a).startsWith('spec'))
+  const fontes = listarSpecs(path.join(raiz, cfg.pastaSpecs))
     .map(lerSpec)
     .concat(listarIssues(raiz, cfg).map(lerIssue))
   const vistos = new Set()
@@ -871,7 +875,7 @@ const MAX_LICOES_LIDAS = 10
 // Falhas que o auditor não registra sozinho; pedem a evidência por escrito.
 const FALHAS_SEM_SINAL = ['revisildo', 'teste-manual']
 
-function idDaIssue(caminhoOuId) {
+export function idDaIssue(caminhoOuId) {
   const m = /^([A-Za-z]+\d+-\d+)/.exec(path.basename(caminhoOuId))
   return m ? m[1].toUpperCase() : null
 }
@@ -903,6 +907,30 @@ export function registrarSinais(raiz, relatorio) {
   }
   fs.mkdirSync(path.dirname(arquivoDeSinais(raiz)), { recursive: true })
   fs.writeFileSync(arquivoDeSinais(raiz), `${JSON.stringify(sinais, null, 2)}\n`)
+}
+
+// Último veredito (de uma issue ou de uma série), ao lado dos sinais: fora do
+// versionamento. O gancho de início de sessão mostra esse veredito.
+function arquivoDoUltimoVeredito(raiz) {
+  return path.join(path.dirname(arquivoDeSinais(raiz)), 'auditor-ultimo.json')
+}
+
+// Só informativo: se não der para gravar, o veredito do comando não muda.
+export function registrarUltimoVeredito(raiz, alvo, veredito, dia = hoje()) {
+  try {
+    const arquivo = arquivoDoUltimoVeredito(raiz)
+    fs.mkdirSync(path.dirname(arquivo), { recursive: true })
+    fs.writeFileSync(arquivo, `${JSON.stringify({ alvo, veredito, dia }, null, 2)}\n`)
+  } catch {}
+}
+
+// null se não há registro ou se ele está ilegível.
+export function lerUltimoVeredito(raiz) {
+  try {
+    return JSON.parse(ler(arquivoDoUltimoVeredito(raiz)))
+  } catch {
+    return null
+  }
 }
 
 export function lerLicoes(raiz, cfg) {
@@ -1062,6 +1090,7 @@ export function principal(args, raiz = process.cwd()) {
     if (!caminho) return erroDeUso(`issue "${posicionais[0]}" não encontrada em ${cfg.pastaIssues}`)
     const rel = executarIssue(raiz, cfg, caminho, { semRodar })
     registrarSinais(raiz, rel)
+    registrarUltimoVeredito(raiz, idDaIssue(caminho) || path.basename(caminho), rel.veredito)
     if (json) console.log(JSON.stringify(rel, null, 2))
     else imprimirIssue(rel)
     return rel.saida
@@ -1071,6 +1100,7 @@ export function principal(args, raiz = process.cwd()) {
     if (!posicionais[0]) return erroDeUso('diga qual série')
     const rel = executarSerie(raiz, cfg, posicionais[0], { semRodar })
     if (rel.issues.length === 0 && rel.problemas.length === 0) return erroDeUso(`nenhuma issue da série ${rel.serie}`)
+    registrarUltimoVeredito(raiz, `série ${rel.serie}`, rel.veredito)
     if (json) {
       console.log(JSON.stringify(rel, null, 2))
       return rel.saida
