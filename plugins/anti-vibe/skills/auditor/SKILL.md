@@ -20,7 +20,9 @@ node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" issue <id|caminho> [--sem-rodar
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" serie <série> [--sem-rodar] [--json]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" esteira-lista <série|id> [--json | --linha]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" estado <id> [--json | --linha]
-node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" iniciar <id|caminho>
+node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" metricas [série] [--json]
+node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" metricas defeito <id> --texto "..."
+node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" iniciar <id|caminho> [--esteira]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" antes <id|caminho> [--json]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" suposicoes
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" regras
@@ -39,6 +41,8 @@ node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" confirmar <id> <CA-...> --por <
 | Os testes falham antes do código? | `antes S1-02` (logo depois de escrever os testes) |
 | O que a esteira vai rodar, e o que poderia rodar junto? | `esteira-lista S1` (campo `lotes`) |
 | Quantas tentativas a issue já gastou? | `estado S1-02` |
+| Como a esteira está indo? | `metricas S1` |
+| Achei um defeito depois do veredito verde | `metricas defeito S1-02 --texto "..."` |
 | O que estamos assumindo? | `suposicoes` |
 | O que cada regra acha no projeto hoje? | `regras` |
 | A pessoa fez o teste manual | `confirmar S1-03 CA-S1-04 --por <nome>` |
@@ -131,6 +135,16 @@ sinais, confirmações, registro) fica no projeto, nunca no plugin.
   tentativa.
 - O registro fica em `auditor-registro.json`, dentro da pasta do git (fora de git, em
   `.claude/`). Só o auditor o escreve: não edite à mão.
+
+## Métricas
+
+Cada issue que passa pela esteira (iniciada com `iniciar --esteira`) deixa registro em `metricas.json`, na pasta das lições
+(configurável em `arquivoMetricas`): início (`iniciar`), tentativas no portão do executor,
+se passou de primeira, escalonamentos com o gatilho (`pendencia`, `testes`, `auditor`,
+`revisor`, `risco`, `falha`), intervenções humanas (cada escalonamento resolvido) e fim (o
+commit). A esteira registra sozinha; defeito achado depois do veredito, a pessoa registra com
+`metricas defeito`. O relatório `metricas <série>` mostra a taxa de aprovação de primeira, as
+tentativas médias, os escalonamentos por gatilho, as intervenções e os defeitos.
 
 ## Issue avulsa
 

@@ -83,6 +83,7 @@ function resumo(parada) {
     motivo: parada.motivo,
     detalhes: parada.detalhes || '',
     tentativas: parada.tentativas === undefined ? null : parada.tentativas,
+    gatilho: parada.gatilho || null,
     aguardaSim: Boolean(parada.aguardaSim),
     veredito: parada.veredito || null,
     arquivos: parada.arquivos || [],
@@ -121,15 +122,17 @@ phase('Issues')
 async function rodarIssue(issue) {
   const id = issue.id
   const P = 'Issues'
-  const parar = (motivo, extra) => ({ issue: id, motivo, ...extra })
+  // Sem gatilho dito, a parada é falha mecânica (agente que não respondeu, comando que falhou).
+  const parar = (motivo, extra = {}) => ({ issue: id, motivo, gatilho: 'falha', ...extra })
 
   if (emAberto(issue).length) {
     return parar('há suposição ou pergunta em aberto na issue, antes de implementar', {
+      gatilho: 'pendencia',
       detalhes: emAberto(issue).join(', '),
       decisao: `responda ou confirme ${emAberto(issue).join(', ')} na issue ${issue.caminho} e retome a esteira`,
     })
   }
-  const inicio = await rodar(`${AUDITOR} iniciar ${id}`, `iniciar:${id}`, P)
+  const inicio = await rodar(`${AUDITOR} iniciar ${id} --esteira`, `iniciar:${id}`, P)
   if (inicio.codigo !== 0) {
     return parar('não deu para marcar a issue como ativa no portão', { detalhes: inicio.saida, decisao: 'confira a issue e retome' })
   }
@@ -141,6 +144,7 @@ async function rodarIssue(issue) {
   if (!atual) return parar('não deu para reler a issue depois do plano', { decisao: 'confira a issue e retome' })
   if (emAberto(atual).length) {
     return parar('o plano deixou uma decisão em aberto', {
+      gatilho: 'pendencia',
       detalhes: emAberto(atual).join(', '),
       decisao: `decida ${emAberto(atual).join(', ')} na issue ${atual.caminho} (e na spec) e retome a esteira`,
     })
@@ -153,6 +157,7 @@ async function rodarIssue(issue) {
     const criterios = estado && estado.antes ? estado.antes.criterios : null
     if (!criterios || estado.precisaDecisao || Object.values(criterios).some((c) => c !== 'falhou')) {
       return parar('os testes não ficaram prontos: um teste falhando para cada critério automático', {
+        gatilho: 'testes',
         detalhes: criterios ? Object.entries(criterios).map(([c, e]) => `${c}: ${e}`).join('; ') : 'sem registro antes',
         tentativas: estado ? estado.tentativas || 0 : null,
         decisao: 'veja os testes que faltam ou que já passam, decida e retome',
@@ -176,6 +181,7 @@ async function rodarIssue(issue) {
       const estado = json(await rodar(`${AUDITOR} estado ${id} --linha`, `estado:${id}:${rodada}`, P))
       const faltam = (rel.problemas || []).map((p) => `${p.codigo} — ${p.alvo}: ${p.detalhe}`)
       return parar(estado && estado.precisaDecisao ? 'o auditor reprovou até o limite de tentativas' : `o auditor não aprovou (veredito: ${rel.veredito})`, {
+        gatilho: 'auditor',
         detalhes: faltam.join('\n'),
         tentativas: estado ? estado.tentativas || 0 : null,
         decisao: 'decida o que fazer com os critérios que faltam (corrigir a issue, a spec ou o código) e retome',
@@ -200,6 +206,7 @@ async function rodarIssue(issue) {
     apontamentos = revisao.apontamentos
     if (rodada === 2) {
       return parar('o revisor independente continuou apontando problema depois de uma correção', {
+        gatilho: 'revisor',
         detalhes: apontamentos,
         decisao: 'leia os apontamentos, decida e retome (a issue não foi commitada)',
       })
@@ -208,6 +215,7 @@ async function rodarIssue(issue) {
 
   if (atual.risco) {
     return parar('issue de risco: o auditor e o revisor aprovaram; o commit espera o seu sim', {
+      gatilho: 'risco',
       detalhes: `veja as mudanças com git diff -- ${atual.arquivos.join(' ')}`,
       aguardaSim: true,
       veredito,
@@ -217,11 +225,13 @@ async function rodarIssue(issue) {
   }
 
   const mover = veredito === 'alinhada'
+  // O fim entra nas métricas antes do commit, para ir junto com ele.
+  await rodar(`${AUDITOR} metricas fim ${id}`, 'metricas:fim', P)
   const commit = await agent(
     [
       `Faça o commit da issue ${id}, no branch atual (${ramo}), pela ferramenta Bash.`,
       `1. Adicione um a um (git add <arquivo>), entre os arquivos mexidos, os desta lista: ${atual.arquivos.join(', ')};`,
-      `   e os documentos do fluxo mexidos, dentro de ${lista.pastaSpecs}/. Nunca adicione tudo de uma vez (git add -A ou git add .).`,
+      `   os documentos do fluxo mexidos, dentro de ${lista.pastaSpecs}/, e o arquivo de métricas, ${lista.arquivoMetricas || 'se existir'}. Nunca adicione tudo de uma vez (git add -A ou git add .).`,
       mover
         ? `2. Mova a issue para a pasta de concluídas: git mv ${atual.caminho} ${lista.pastaIssues}/concluidas_${atual.serie || lista.serie}/ (crie a pasta se faltar).`
         : '2. Não mova a issue: ela tem teste manual pendente e fica aberta.',
@@ -243,7 +253,10 @@ for (const issue of lista.issues) {
     continue
   }
   const parada = await rodarIssue(issue)
-  if (parada) return resumo(parada)
+  if (parada) {
+    await rodar(`${AUDITOR} metricas escalonar ${issue.id} --gatilho ${parada.gatilho}`, 'metricas:escalonar', 'Issues')
+    return resumo(parada)
+  }
   concluidas.push(issue.id)
   log(`${issue.id} commitada no ${ramo}`)
 }

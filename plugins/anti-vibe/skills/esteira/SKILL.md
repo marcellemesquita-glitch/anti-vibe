@@ -20,9 +20,10 @@ nada ao remoto**: isso é da pessoa.
 ## Passo 1 — Alvo e estado do repositório
 
 1. O alvo é uma série (ex.: `S1`) ou uma issue (ex.: `S1-03`). Sem alvo, pergunte qual.
-2. Rode `git status --short`. Os documentos do fluxo (a spec e as issues, na pasta de specs
-   do `.claude/auditor.json`, por padrão `pre-desenvolvimento/`) não contam: logo depois do
-   break ou da triagem eles ainda não foram commitados, e vão no commit da primeira issue.
+2. Rode `git status --short`. Os documentos do fluxo (a spec, as issues e o arquivo de
+   métricas, na pasta de specs do `.claude/auditor.json`, por padrão `pre-desenvolvimento/`)
+   não contam: logo depois do break ou da triagem eles ainda não foram commitados, e vão no
+   commit da próxima issue.
    Havendo outra mudança não commitada, mostre a lista e pergunte à pessoa o que fazer antes
    de seguir (guardar, descartar ou commitar à parte). Não descarte nada sem o sim dela.
    Numa retomada depois de interrupção, essas costumam ser as mudanças da issue que estava
@@ -60,8 +61,10 @@ Mostre, em linguagem simples:
 A issue já passou pelo auditor e pelo revisor; falta só o sim da pessoa para o commit.
 
 1. Mostre as mudanças (`git diff` dos `arquivos` do resumo) e pergunte se pode commitar.
-2. Com o sim, faça o commit como a esteira faria: adicione um a um os `arquivos` mexidos e
-   os documentos do fluxo mexidos (nunca tudo de uma vez); se o `veredito` do resumo for
+2. Com o sim, registre o fim nas métricas
+   (`node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" metricas fim <id>`) e faça o commit como a
+   esteira faria: adicione um a um os `arquivos` mexidos, os documentos do fluxo mexidos e o
+   arquivo de métricas (nunca tudo de uma vez); se o `veredito` do resumo for
    "alinhada", mova a issue para `concluidas_<série>/` com `git mv` (com teste manual
    pendente, ela fica aberta); mensagem com a primeira linha `feat(<id>): <título>` e,
    depois de uma linha em branco, `Esteira-Issue: <id>`.

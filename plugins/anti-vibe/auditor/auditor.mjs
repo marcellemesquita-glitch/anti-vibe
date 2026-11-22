@@ -9,7 +9,9 @@
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" serie <série> [--sem-rodar] [--json]
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" esteira-lista <série|id> [--json | --linha]
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" estado <id> [--json | --linha]
-//   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" iniciar <id|caminho>
+//   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" metricas [série] [--json]
+//   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" metricas escalonar <id> --gatilho <gatilho> | fim <id> | defeito <id> --texto "..."
+//   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" iniciar <id|caminho> [--esteira]
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" antes <id|caminho> [--json]
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" suposicoes
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" confirmar <id> <CA-...> --por <nome> [--dia dd/mm/aaaa]
@@ -1417,14 +1419,22 @@ export function registrarAntes(raiz, cfg, caminho) {
 }
 
 // Começo do trabalho numa issue: ela vira a ativa do portão, com a contagem zerada e
-// sem registro `antes` (quem o faz é o portão do escritor de testes).
-export function iniciarIssue(raiz, caminho) {
+// sem registro `antes` (quem o faz é o portão do escritor de testes). `esteira`: a
+// issue entra nas métricas (só a esteira inicia assim).
+export function iniciarIssue(raiz, caminho, { esteira = false } = {}) {
   const id = idDaIssue(caminho)
   if (!id) return { erro: `o nome do arquivo da issue não começa pelo identificador (ex.: S1-01-...): ${path.basename(caminho)}` }
   const registro = lerRegistro(raiz)
   registro.ativa = id
   registro.issues[id] = { tentativas: 0, precisaDecisao: false }
   gravarJson(arquivoDoRegistro(raiz), registro)
+  if (esteira) {
+    try {
+      metricaInicio(raiz, carregarConfig(raiz), id)
+    } catch {
+      // métrica é informação: se não der para gravar, o iniciar vale do mesmo jeito
+    }
+  }
   return { issue: id }
 }
 
@@ -1486,6 +1496,17 @@ export function conferirNoPortao(raiz, papel = 'executor') {
     }
   } catch (erro) {
     travas = [problema('PORTAO_SEM_CONFERENCIA', id, `o auditor não conseguiu conferir: ${erro.message}`, 'desfaça o que quebrou a conferência')]
+  }
+  // Toda conferência do portão do executor é uma tentativa, inclusive a reprovação sem
+  // auditoria. Métrica é informação: não muda a decisão do portão.
+  if (papel === 'executor') {
+    try {
+      metricaTentativa(raiz, carregarConfig(raiz), id, travas.length === 0)
+    } catch {
+      try {
+        metricaTentativa(raiz, { ...CONFIG_PADRAO }, id, travas.length === 0)
+      } catch {}
+    }
   }
   if (travas.length === 0) return { libera: true }
 
@@ -1559,6 +1580,7 @@ export function listarParaEsteira(raiz, cfg, alvo) {
     serie: umaIssue ? (issues[0] && issues[0].serie) || null : alvo.toUpperCase(),
     pastaIssues: cfg.pastaIssues,
     pastaSpecs: cfg.pastaSpecs,
+    arquivoMetricas: path.relative(raiz, arquivoDeMetricas(raiz, cfg)).split(path.sep).join('/'),
     issues,
     lotes: lotesDaEsteira(issues),
   }
@@ -1620,6 +1642,150 @@ export function lotesDaEsteira(issues) {
     pendentes = pendentes.filter((i) => !lote.includes(i))
   }
   return lotes
+}
+
+// ---------------------------------------------------------------- métricas
+
+// Registro por issue da esteira, versionado, ao lado das lições: início e fim,
+// tentativas no portão do executor, se passou de primeira, escalonamentos com o
+// gatilho e intervenções humanas; mais os defeitos achados depois do veredito.
+export const GATILHOS = ['pendencia', 'testes', 'auditor', 'revisor', 'risco', 'falha']
+
+export function arquivoDeMetricas(raiz, cfg) {
+  return path.join(raiz, cfg.arquivoMetricas || path.join(path.dirname(cfg.arquivoLicoes), 'metricas.json'))
+}
+
+export function lerMetricas(raiz, cfg) {
+  const arquivo = arquivoDeMetricas(raiz, cfg)
+  try {
+    const m = JSON.parse(ler(arquivo))
+    return { issues: m.issues || {}, defeitos: m.defeitos || [], recomecadoEm: m.recomecadoEm || null, ilegivel: false }
+  } catch {
+    return { issues: {}, defeitos: [], recomecadoEm: null, ilegivel: fs.existsSync(arquivo) }
+  }
+}
+
+// Grava as métricas. Arquivo ilegível não é apagado calado: vira uma cópia
+// `.ilegivel` e o arquivo novo leva a marca de quando o registro recomeçou.
+function gravarMetricas(raiz, cfg, m) {
+  const arquivo = arquivoDeMetricas(raiz, cfg)
+  if (m.ilegivel) {
+    fs.copyFileSync(arquivo, `${arquivo}.ilegivel`)
+    m.recomecadoEm = agora()
+    m.ilegivel = false
+  }
+  gravarJson(arquivo, { ...(m.recomecadoEm ? { recomecadoEm: m.recomecadoEm } : {}), issues: m.issues, defeitos: m.defeitos })
+}
+
+// Muda o registro de uma issue. `criar` falso: issue sem registro (que não passou pelo
+// `iniciar --esteira`) fica de fora.
+function mudarMetricas(raiz, cfg, id, mudar, { criar = true } = {}) {
+  const m = lerMetricas(raiz, cfg)
+  const chave = idDaIssue(id) || id.toUpperCase()
+  if (!m.issues[chave] && !criar) return null
+  const registro = m.issues[chave] || { inicio: null, fim: null, tentativas: 0, passouDePrimeira: null, escalonamentos: [], intervencoes: 0 }
+  mudar(registro)
+  m.issues[chave] = registro
+  gravarMetricas(raiz, cfg, m)
+  return registro
+}
+
+// Escalonamento ainda em aberto que a pessoa resolveu (a esteira retomou a issue, ou
+// a issue foi commitada depois do sim): conta uma intervenção humana cada.
+function resolverEscalonamentos(registro) {
+  for (const e of registro.escalonamentos) {
+    if (e.resolvido) continue
+    e.resolvido = true
+    registro.intervencoes += 1
+  }
+}
+
+const agora = () => new Date().toISOString()
+
+// Início (ou retomada) da issue na esteira: o primeiro início fica; um fim antigo sai,
+// porque a issue voltou a ser trabalhada.
+export function metricaInicio(raiz, cfg, id) {
+  return mudarMetricas(raiz, cfg, id, (r) => {
+    if (!r.inicio) r.inicio = agora()
+    r.fim = null
+    resolverEscalonamentos(r)
+  })
+}
+
+// Conferência do portão do executor; só para issue da esteira.
+export function metricaTentativa(raiz, cfg, id, aprovada) {
+  return mudarMetricas(
+    raiz,
+    cfg,
+    id,
+    (r) => {
+      r.tentativas += 1
+      if (r.passouDePrimeira === null) r.passouDePrimeira = aprovada
+    },
+    { criar: false }
+  )
+}
+
+export function metricaEscalonamento(raiz, cfg, id, gatilho) {
+  return mudarMetricas(raiz, cfg, id, (r) => r.escalonamentos.push({ gatilho, quando: agora(), resolvido: false }))
+}
+
+export function metricaFim(raiz, cfg, id) {
+  return mudarMetricas(raiz, cfg, id, (r) => {
+    resolverEscalonamentos(r)
+    r.fim = agora()
+  })
+}
+
+// Defeito achado depois do veredito: vai só para a lista de defeitos.
+export function metricaDefeito(raiz, cfg, id, texto) {
+  const m = lerMetricas(raiz, cfg)
+  m.defeitos.push({ issue: idDaIssue(id) || id.toUpperCase(), texto, dia: hoje() })
+  gravarMetricas(raiz, cfg, m)
+}
+
+// Resumo de uma série (ou do projeto, sem série).
+export function relatorioDeMetricas(raiz, cfg, serie = null) {
+  const m = lerMetricas(raiz, cfg)
+  const daSerie = (id) => !serie || id.startsWith(`${serie.toUpperCase()}-`)
+  const registros = Object.entries(m.issues)
+    .filter(([id]) => daSerie(id))
+    .map(([id, r]) => ({ id, ...r }))
+  const conferidas = registros.filter((r) => r.passouDePrimeira !== null)
+  const porGatilho = {}
+  for (const r of registros) for (const e of r.escalonamentos) porGatilho[e.gatilho] = (porGatilho[e.gatilho] || 0) + 1
+  return {
+    serie: serie ? serie.toUpperCase() : null,
+    issues: registros.length,
+    concluidas: registros.filter((r) => r.fim).length,
+    conferidas: conferidas.length,
+    dePrimeira: conferidas.filter((r) => r.passouDePrimeira).length,
+    taxaDePrimeira: conferidas.length ? conferidas.filter((r) => r.passouDePrimeira).length / conferidas.length : null,
+    tentativasMedias: conferidas.length ? conferidas.reduce((s, r) => s + r.tentativas, 0) / conferidas.length : null,
+    escalonamentosPorGatilho: porGatilho,
+    intervencoes: registros.reduce((s, r) => s + r.intervencoes, 0),
+    defeitos: m.defeitos.filter((d) => daSerie(d.issue)),
+    ilegivel: m.ilegivel,
+    recomecadoEm: m.recomecadoEm,
+  }
+}
+
+function imprimirMetricas(rel, escrever = console.log) {
+  const numero = (n) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 })
+  escrever(`Métricas ${rel.serie ? `da série ${rel.serie}` : 'do projeto'} (${rel.issues} issues, ${rel.concluidas} concluídas)`)
+  if (rel.ilegivel) escrever('  aviso: o arquivo de métricas está ilegível; o próximo registro guarda uma cópia (.ilegivel) e recomeça do zero')
+  if (rel.recomecadoEm) escrever(`  aviso: o registro recomeçou em ${rel.recomecadoEm}, porque o arquivo anterior estava ilegível (cópia em .ilegivel)`)
+  if (rel.issues === 0) {
+    escrever('  Ainda não há registros: as métricas nascem quando a esteira roda.')
+    return
+  }
+  escrever(`  Aprovação de primeira: ${rel.taxaDePrimeira === null ? 'sem conferências' : `${Math.round(rel.taxaDePrimeira * 100)}% (${rel.dePrimeira} de ${rel.conferidas})`}`)
+  escrever(`  Tentativas médias: ${rel.tentativasMedias === null ? 'sem conferências' : numero(rel.tentativasMedias)}`)
+  const gatilhos = Object.entries(rel.escalonamentosPorGatilho)
+  escrever(`  Escalonamentos por gatilho: ${gatilhos.length ? gatilhos.map(([g, n]) => `${g} ${n}`).join(', ') : 'nenhum'}`)
+  escrever(`  Intervenções humanas: ${rel.intervencoes}`)
+  escrever(`  Defeitos depois do veredito: ${rel.defeitos.length}`)
+  for (const d of rel.defeitos) escrever(`    - ${d.issue}: ${d.texto} (${d.dia})`)
 }
 
 export function lerLicoes(raiz, cfg) {
@@ -1772,7 +1938,7 @@ export function principal(args, raiz = process.cwd()) {
   const json = resto.includes('--json')
   // Uma linha só de JSON, resumida: o formato que a esteira lê (um agente copia a saída).
   const linha = resto.includes('--linha')
-  const comValor = ['--por', '--dia', '--falha', '--texto', '--evidencia']
+  const comValor = ['--por', '--dia', '--falha', '--texto', '--evidencia', '--gatilho']
   const posicionais = resto.filter((a, i) => !a.startsWith('--') && !comValor.includes(resto[i - 1]))
 
   if (comando === 'issue') {
@@ -1807,6 +1973,32 @@ export function principal(args, raiz = process.cwd()) {
     }
     console.log(`\nVeredito da série: ${rel.veredito}`)
     return rel.saida
+  }
+
+  if (comando === 'metricas') {
+    const [sub, id] = posicionais
+    if (sub === 'escalonar' || sub === 'fim' || sub === 'defeito') {
+      if (!id || !idDaIssue(id)) return erroDeUso('diga a issue (ex.: S1-02)')
+      if (sub === 'escalonar') {
+        const gatilho = opcao(resto, '--gatilho')
+        if (!GATILHOS.includes(gatilho)) return erroDeUso(`diga o gatilho: --gatilho ${GATILHOS.join(' | ')}`)
+        metricaEscalonamento(raiz, cfg, id, gatilho)
+        console.log(`${idDaIssue(id)}: escalonamento registrado (${gatilho}).`)
+      } else if (sub === 'fim') {
+        metricaFim(raiz, cfg, id)
+        console.log(`${idDaIssue(id)}: fim registrado.`)
+      } else {
+        const texto = opcao(resto, '--texto')
+        if (vazio(texto)) return erroDeUso('descreva o defeito: --texto "..."')
+        metricaDefeito(raiz, cfg, id, texto)
+        console.log(`${idDaIssue(id)}: defeito registrado.`)
+      }
+      return SAIDA.ALINHADA
+    }
+    const rel = relatorioDeMetricas(raiz, cfg, sub || null)
+    if (json) console.log(JSON.stringify(rel, null, 2))
+    else imprimirMetricas(rel)
+    return SAIDA.ALINHADA
   }
 
   if (comando === 'esteira-lista') {
@@ -1847,7 +2039,7 @@ export function principal(args, raiz = process.cwd()) {
     if (!posicionais[0]) return erroDeUso('diga qual issue')
     const caminho = acharIssue(raiz, cfg, posicionais[0])
     if (!caminho) return erroDeUso(`issue "${posicionais[0]}" não encontrada em ${cfg.pastaIssues}`)
-    const rel = iniciarIssue(raiz, caminho)
+    const rel = iniciarIssue(raiz, caminho, { esteira: resto.includes('--esteira') })
     if (rel.erro) return erroDeUso(rel.erro)
     console.log(`${rel.issue} é agora a issue ativa do portão (contagem de tentativas zerada).`)
     return SAIDA.ALINHADA
