@@ -67,8 +67,14 @@ function palavras(texto) {
 // Documentos de desenvolvimento do caderno: arquivos inteiros e linhas longas, para
 // pegar cópia renomeada ou trecho colado.
 const PASTAS_DE_DOCUMENTOS = ['pre-desenvolvimento', 'reports', 'research_notes', path.join('docs', 'specs-arquivadas')]
+// A versão de abril do fluxo, arquivada, é a origem das skills do plugin (SUP-P1-03 e
+// SUP-P1-85): é o próprio método, não documento de desenvolvimento.
+const VERSAO_DE_ABRIL = ['2026-04-09-workflow-anti-vibe-design.md', '2026-04-09-workflow-anti-vibe.md']
 function documentosDoCaderno() {
   const arquivos = PASTAS_DE_DOCUMENTOS.flatMap((p) => todosOsArquivos(path.join(CADERNO, p)))
+    .filter((a) => !(a.includes(`${path.sep}specs-arquivadas${path.sep}`) && VERSAO_DE_ABRIL.includes(path.basename(a))))
+    // O README e o CLAUDE.md da raiz do caderno também são documentos dele.
+    .concat(['README.md', 'CLAUDE.md'].map((d) => path.join(CADERNO, d)).filter((a) => fs.existsSync(a)))
   const hashes = new Set()
   const linhas = new Set()
   for (const a of arquivos) {
