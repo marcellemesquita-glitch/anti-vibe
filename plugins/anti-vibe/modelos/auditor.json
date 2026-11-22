@@ -1,0 +1,12 @@
+{
+  "pastaSpecs": "pre-desenvolvimento",
+  "pastaIssues": "pre-desenvolvimento/issues",
+  "pastaSpecsArquivadas": "docs/specs-arquivadas",
+  "arquivoLicoes": "pre-desenvolvimento/licoes.md",
+  "pastasTestes": ["src", "test", "tests", "__tests__"],
+  "sufixosTeste": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".test.mjs", ".spec.ts", ".spec.tsx", ".spec.js"],
+  "comandoTeste": "npx vitest run {arquivos} --reporter=json --outputFile={saida}",
+  "aprovadores": [],
+  "foraDoEscopo": ["pre-desenvolvimento/**"],
+  "limiteDeTentativas": 3
+}

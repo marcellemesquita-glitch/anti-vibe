@@ -201,8 +201,34 @@ describe('P1-04 — Auditor rodando de dentro do plugin em qualquer projeto', ()
   }, 60_000)
 
   it('CA-P1-33: o plugin traz só a regra genérica de segredo no frontend, sem nomes de chave de um projeto', () => {
+    // Além das regras do auditor, só o modelo opcional que o novo-projeto copia para o
+    // projeto quando a pessoa pede (SUP-P1-80), com as duas regras de exemplo e sem
+    // nenhum nome de chave.
+    const MODELO = path.join('modelos', 'opcionais', 'auditor-regras.json')
     const arquivosDeRegra = Object.keys(retrato(PLUGIN)).filter((a) => /regras.*\.json$/.test(path.basename(a)))
-    expect(arquivosDeRegra).toEqual([path.join('auditor', 'regras.json')])
+    expect(arquivosDeRegra.sort()).toEqual([path.join('auditor', 'regras.json'), MODELO].sort())
+    // O modelo inteiro, campo por campo: qualquer conteúdo de projeto derruba o teste.
+    expect(JSON.parse(fs.readFileSync(path.join(PLUGIN, MODELO), 'utf8'))).toEqual([
+      {
+        id: 'arquivo-gerado',
+        nome: 'arquivo gerado mexido sem mexer na fonte dele',
+        origem: 'exemplo do anti-vibe: arquivo gerado por ferramenta só muda quando a fonte muda (ajuste os caminhos ao projeto)',
+        tipo: 'intocavel',
+        arquivos: ['**/generated/**'],
+        salvoSeMudar: ['**/schema/**'],
+        oQueFazer: 'mude a fonte do arquivo gerado e gere de novo; não edite o arquivo gerado à mão',
+      },
+      {
+        id: 'componente-pronto',
+        nome: 'elemento cru no lugar do componente pronto do projeto',
+        origem: 'exemplo do anti-vibe: reuso de código, regra 3 das regras sempre ativas (ajuste os caminhos e o elemento ao projeto)',
+        tipo: 'conteudo',
+        arquivos: ['**/*.{tsx,jsx}'],
+        excluir: ['**/components/**', '**/*.test.{tsx,jsx}'],
+        padrao: '<button\\b',
+        oQueFazer: 'use o componente pronto do projeto para esse elemento, em vez do elemento cru',
+      },
+    ])
 
     const regras = JSON.parse(fs.readFileSync(path.join(PLUGIN, 'auditor', 'regras.json'), 'utf8'))
     expect(regras.map((r) => r.id)).toEqual(['segredo-no-frontend'])
