@@ -1551,6 +1551,7 @@ export function listarParaEsteira(raiz, cfg, alvo) {
       perguntasAbertas: abertas(issue.perguntas, ['respondida']),
       concluida: path.dirname(caminho) !== pastaIssues,
       commitada: commitadas.has(id),
+      dependeDe: dependenciasDaIssue(issue.texto, id),
     }
   })
   return {
@@ -1559,7 +1560,66 @@ export function listarParaEsteira(raiz, cfg, alvo) {
     pastaIssues: cfg.pastaIssues,
     pastaSpecs: cfg.pastaSpecs,
     issues,
+    lotes: lotesDaEsteira(issues),
   }
+}
+
+// Identificador sem zeros à esquerda no número: S1-01 e S1-1 são a mesma issue.
+function idCanonico(id) {
+  return id.toUpperCase().replace(/-0*(\d+)$/, '-$1')
+}
+
+// Issues de que esta depende, pelo campo `**Depende de:**` (feito pelo break). Vale só o
+// que vem antes de um parêntese ou de "independente": "P1-05 (independente de P1-06)"
+// depende só da P1-05. Códigos de critério, suposição e pergunta não contam.
+export function dependenciasDaIssue(texto, id) {
+  const campo = (/^\*\*Depende de:\*\*\s*(.+)$/m.exec(semBlocosDeCodigo(texto)) || [])[1] || ''
+  const trecho = campo.split(/\(|\bindependente/i)[0]
+  const ids = trecho.match(/(?<![A-Za-z-])[A-Za-z]+\d+-\d+\b/g) || []
+  return [...new Set(ids.map((d) => d.toUpperCase()))].filter((d) => idCanonico(d) !== idCanonico(id || ''))
+}
+
+function caminhoComparavel(arquivo) {
+  return arquivo.replace(/\\/g, '/').replace(/^\.\//, '')
+}
+
+// Grupos de issues que podem rodar juntas, em ordem (cada grupo depois do anterior).
+// Entram juntas as issues que não dependem umas das outras, cujas dependências já
+// foram feitas (num grupo anterior, ou de outra série) e que têm a seção Arquivos
+// preenchida sem arquivo em comum. Issue sem Arquivos fica sozinha. Dependência da
+// mesma série que não está na lista, ou em círculo: cada issue presa vira um grupo só
+// dela, no fim, na ordem.
+export function lotesDaEsteira(issues) {
+  const serie = (id) => id.split('-')[0].toUpperCase()
+  const seriesDoAlvo = new Set(issues.map((i) => serie(i.id)))
+  const feitas = new Set(issues.filter((i) => i.commitada || i.concluida).map((i) => idCanonico(i.id)))
+  let pendentes = issues.filter((i) => !feitas.has(idCanonico(i.id)))
+  const arquivos = (i) => (i.arquivos || []).map(caminhoComparavel)
+  const lotes = []
+  while (pendentes.length) {
+    const lote = []
+    for (const issue of pendentes) {
+      const prontas = (issue.dependeDe || []).every((d) => feitas.has(idCanonico(d)) || !seriesDoAlvo.has(serie(d)))
+      if (!prontas) continue
+      if (lote.length === 0) {
+        lote.push(issue)
+        continue
+      }
+      const disjunta =
+        arquivos(issue).length > 0 &&
+        lote.every((outra) => arquivos(outra).length > 0 && !arquivos(outra).some((a) => arquivos(issue).includes(a)))
+      if (disjunta) lote.push(issue)
+    }
+    if (lote.length === 0) {
+      // Ninguém pronto: dependência em círculo ou de issue que não vai rodar.
+      for (const issue of pendentes) lotes.push([issue.id])
+      break
+    }
+    lotes.push(lote.map((i) => i.id))
+    for (const i of lote) feitas.add(idCanonico(i.id))
+    pendentes = pendentes.filter((i) => !lote.includes(i))
+  }
+  return lotes
 }
 
 export function lerLicoes(raiz, cfg) {

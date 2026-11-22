@@ -63,9 +63,11 @@ function json(r) {
 const concluidas = []
 const jaFeitas = []
 let ramo = null
+// Grupos de issues que poderiam rodar juntas (só informação: a esteira roda uma por vez).
+let podemRodarJuntas = []
 
 function resumo(parada) {
-  const base = { alvo, ramo, concluidas, jaFeitas }
+  const base = { alvo, ramo, concluidas, jaFeitas, podemRodarJuntas }
   if (!parada) {
     return {
       ...base,
@@ -110,6 +112,8 @@ const lista = json(await rodar(`${AUDITOR} esteira-lista ${alvo} --linha`, 'list
 if (!lista || !Array.isArray(lista.issues) || lista.issues.length === 0) {
   return resumo({ motivo: `não deu para listar as issues de "${alvo}" no branch ${ramo}`, decisao: 'confira o alvo e rode a esteira de novo' })
 }
+podemRodarJuntas = (lista.lotes || []).filter((lote) => lote.length > 1)
+if (podemRodarJuntas.length) log(`Poderiam rodar juntas: ${podemRodarJuntas.map((l) => l.join(' + ')).join('; ')} (por enquanto, uma por vez)`)
 
 // ---------------------------------------------------------------------- issues
 phase('Issues')

@@ -37,7 +37,7 @@ node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" confirmar <id> <CA-...> --por <
 | Qual critério não tem teste? | `issue S1-02` ou `serie S1` |
 | Posso arquivar a spec? | `serie S1` (tem que dar **alinhada**) |
 | Os testes falham antes do código? | `antes S1-02` (logo depois de escrever os testes) |
-| O que a esteira vai rodar? | `esteira-lista S1` |
+| O que a esteira vai rodar, e o que poderia rodar junto? | `esteira-lista S1` (campo `lotes`) |
 | Quantas tentativas a issue já gastou? | `estado S1-02` |
 | O que estamos assumindo? | `suposicoes` |
 | O que cada regra acha no projeto hoje? | `regras` |

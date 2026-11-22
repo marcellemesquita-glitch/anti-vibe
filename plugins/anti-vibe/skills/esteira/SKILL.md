@@ -46,6 +46,8 @@ Espere o resultado. Não interfira no meio: o workflow para sozinho quando preci
 Mostre, em linguagem simples:
 
 - **Concluídas agora** (`concluidas`) e **já feitas antes** (`jaFeitas`), com o branch (`ramo`).
+- Se houver, as issues que **poderiam rodar juntas** (`podemRodarJuntas`): independentes e sem
+  arquivo em comum. Por enquanto a esteira roda uma por vez; é só informação.
 - Se parou (`parou` verdadeiro): em qual issue (`parouEm`; vazio quando parou antes de
   começar as issues), o **motivo** (ou o `erro`), os **detalhes** (critérios que faltam,
   apontamentos do revisor, pergunta em aberto) e, havendo, quantas **tentativas** foram
