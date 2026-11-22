@@ -5,8 +5,10 @@
 // teste passou; suposições e perguntas estão fechadas; as seções obrigatórias
 // existem. Mora na pasta do plugin e roda sempre a partir da RAIZ do projeto:
 //
-//   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" issue <id|caminho> [--sem-rodar] [--json]
+//   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" issue <id|caminho> [--sem-rodar] [--json | --linha]
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" serie <série> [--sem-rodar] [--json]
+//   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" esteira-lista <série|id> [--json | --linha]
+//   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" estado <id> [--json | --linha]
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" iniciar <id|caminho>
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" antes <id|caminho> [--json]
 //   node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" suposicoes
@@ -1517,6 +1519,49 @@ export function conferirNoPortao(raiz, papel = 'executor') {
   }
 }
 
+// ---------------------------------------------------------------- esteira
+
+// O que a esteira precisa saber das issues de uma série (ou de uma issue), inclusive
+// as concluídas: em ordem numérica, com o risco, os critérios automáticos, os arquivos, o que está em aberto e
+// se a issue já foi commitada pela esteira (linha `Esteira-Issue: <id>` no histórico
+// do branch atual) ou já está nas concluídas.
+export function listarParaEsteira(raiz, cfg, alvo) {
+  const umaIssue = /^[A-Za-z]+\d+-\d+$/.test(alvo) || alvo.endsWith('.md')
+  const caminhos = umaIssue
+    ? [acharIssue(raiz, cfg, alvo)].filter(Boolean)
+    : listarIssues(raiz, cfg, { comConcluidas: true }).filter((a) => serieDaIssue(a) === alvo.toUpperCase())
+  caminhos.sort((x, y) => path.basename(x).localeCompare(path.basename(y), 'pt-BR', { numeric: true }))
+  const historico = git(raiz, ['log', '--format=%B']) || ''
+  const commitadas = new Set([...historico.matchAll(/^Esteira-Issue:\s*(\S+)/gm)].map((m) => m[1].toUpperCase()))
+  const pastaIssues = path.join(raiz, cfg.pastaIssues)
+  const issues = caminhos.map((caminho) => {
+    const issue = lerIssue(caminho)
+    const id = idDaIssue(caminho)
+    const abertas = (lista, fechados) => lista.filter((r) => !fechados.includes(r.status)).map((r) => r.id)
+    return {
+      id,
+      caminho: path.relative(raiz, caminho).split(path.sep).join('/'),
+      titulo: issue.titulo,
+      serie: issue.serie,
+      avulsa: issue.avulsa,
+      risco: semAcento((/^\*\*Risco:\*\*\s*(\S+)/m.exec(semBlocosDeCodigo(issue.texto)) || [])[1] || '') === 'sim',
+      automaticos: issue.criterios.filter((c) => c.prova === 'automatica').length,
+      arquivos: issue.arquivos || [],
+      suposicoesAbertas: abertas(issue.suposicoes, ['confirmada', 'invalidada']),
+      perguntasAbertas: abertas(issue.perguntas, ['respondida']),
+      concluida: path.dirname(caminho) !== pastaIssues,
+      commitada: commitadas.has(id),
+    }
+  })
+  return {
+    alvo,
+    serie: umaIssue ? (issues[0] && issues[0].serie) || null : alvo.toUpperCase(),
+    pastaIssues: cfg.pastaIssues,
+    pastaSpecs: cfg.pastaSpecs,
+    issues,
+  }
+}
+
 export function lerLicoes(raiz, cfg) {
   const arquivo = path.join(raiz, cfg.arquivoLicoes)
   if (!fs.existsSync(arquivo)) return []
@@ -1665,6 +1710,8 @@ export function principal(args, raiz = process.cwd()) {
   const [comando, ...resto] = args
   const semRodar = resto.includes('--sem-rodar')
   const json = resto.includes('--json')
+  // Uma linha só de JSON, resumida: o formato que a esteira lê (um agente copia a saída).
+  const linha = resto.includes('--linha')
   const comValor = ['--por', '--dia', '--falha', '--texto', '--evidencia']
   const posicionais = resto.filter((a, i) => !a.startsWith('--') && !comValor.includes(resto[i - 1]))
 
@@ -1675,7 +1722,10 @@ export function principal(args, raiz = process.cwd()) {
     const rel = executarIssue(raiz, cfg, caminho, { semRodar })
     registrarSinais(raiz, rel)
     registrarUltimoVeredito(raiz, idDaIssue(caminho) || path.basename(caminho), rel.veredito)
-    if (json) console.log(JSON.stringify(rel, null, 2))
+    if (linha) {
+      const problemas = rel.problemas.filter((p) => p.trava).map(({ codigo, alvo, detalhe }) => ({ codigo, alvo, detalhe }))
+      console.log(JSON.stringify({ issue: rel.issue, veredito: rel.veredito, problemas }))
+    } else if (json) console.log(JSON.stringify(rel, null, 2))
     else imprimirIssue(rel)
     return rel.saida
   }
@@ -1697,6 +1747,40 @@ export function principal(args, raiz = process.cwd()) {
     }
     console.log(`\nVeredito da série: ${rel.veredito}`)
     return rel.saida
+  }
+
+  if (comando === 'esteira-lista') {
+    if (!posicionais[0]) return erroDeUso('diga a série ou a issue')
+    const rel = listarParaEsteira(raiz, cfg, posicionais[0])
+    if (rel.issues.length === 0) return erroDeUso(`nenhuma issue de "${posicionais[0]}" em ${cfg.pastaIssues}`)
+    if (linha) console.log(JSON.stringify(rel))
+    else if (json) console.log(JSON.stringify(rel, null, 2))
+    else {
+      console.log(`Esteira: ${rel.alvo} (série ${rel.serie || '?'})`)
+      for (const i of rel.issues) {
+        const marcas = [i.risco && 'risco', i.commitada && 'já commitada', i.concluida && 'concluída', (i.perguntasAbertas.length || i.suposicoesAbertas.length) && 'algo em aberto'].filter(Boolean)
+        console.log(`  ${i.titulo}${marcas.length ? ` (${marcas.join(', ')})` : ''}`)
+      }
+    }
+    return SAIDA.ALINHADA
+  }
+
+  if (comando === 'estado') {
+    if (!posicionais[0]) return erroDeUso('diga qual issue')
+    const id = posicionais[0].toUpperCase()
+    const registro = lerRegistro(raiz)
+    const estado = { issue: id, ativa: registro.ativa === id, ...(registro.issues[id] || {}) }
+    if (estado.antes) {
+      delete estado.antes.testes
+      delete estado.antes.secoes
+    }
+    if (linha) console.log(JSON.stringify(estado))
+    else if (json) console.log(JSON.stringify(estado, null, 2))
+    else {
+      console.log(`${id}${estado.ativa ? ' (ativa no portão)' : ''}: ${estado.tentativas || 0} tentativa(s)${estado.precisaDecisao ? ', precisa de decisão humana' : ''}`)
+      if (estado.antes) for (const [c, e] of Object.entries(estado.antes.criterios)) console.log(`  antes — ${c}: ${e}`)
+    }
+    return SAIDA.ALINHADA
   }
 
   if (comando === 'iniciar') {

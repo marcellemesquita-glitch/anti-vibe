@@ -140,7 +140,9 @@ spec; a lista é consequência dela.
 |---|---|---|---|
 | S3-02 | [o que fica funcionando] | nenhuma | não |
 
-Termine dizendo qual é a primeira issue a rodar, com `/anti-vibe:issue <id>`.
+Logo depois da lista, **inicie a esteira** sobre a série, sem esperar aprovação: invoque a
+skill `anti-vibe:esteira` com a série. Ela leva cada issue do plano ao commit e só para
+quando um gatilho dispara.
 
 ## Ordem de criação
 

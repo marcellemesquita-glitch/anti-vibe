@@ -16,8 +16,10 @@ O script mora no plugin e roda **a partir da raiz do projeto**, só com o Node d
 ambiente:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" issue <id|caminho> [--sem-rodar] [--json]
+node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" issue <id|caminho> [--sem-rodar] [--json | --linha]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" serie <série> [--sem-rodar] [--json]
+node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" esteira-lista <série|id> [--json | --linha]
+node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" estado <id> [--json | --linha]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" iniciar <id|caminho>
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" antes <id|caminho> [--json]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" suposicoes
@@ -35,6 +37,8 @@ node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" confirmar <id> <CA-...> --por <
 | Qual critério não tem teste? | `issue S1-02` ou `serie S1` |
 | Posso arquivar a spec? | `serie S1` (tem que dar **alinhada**) |
 | Os testes falham antes do código? | `antes S1-02` (logo depois de escrever os testes) |
+| O que a esteira vai rodar? | `esteira-lista S1` |
+| Quantas tentativas a issue já gastou? | `estado S1-02` |
 | O que estamos assumindo? | `suposicoes` |
 | O que cada regra acha no projeto hoje? | `regras` |
 | A pessoa fez o teste manual | `confirmar S1-03 CA-S1-04 --por <nome>` |

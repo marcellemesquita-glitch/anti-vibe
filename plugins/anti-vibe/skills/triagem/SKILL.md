@@ -62,8 +62,9 @@ pequeno, uma correção, um ajuste de regra.
 3. **Pare e espere o sim.** Apresentar e já começar é pular o portão.
 4. Com o sim, grave a **issue avulsa** (veja abaixo). É ela que dá ao auditor o que
    conferir.
-5. Siga com `/anti-vibe:issue <série>-01` sobre a issue avulsa (plan → execute → testes
-   → revisildo).
+5. Inicie a esteira sobre a issue avulsa: invoque a skill `anti-vibe:esteira` com
+   `<série>-01`. Ela passa a issue por testes, execute, auditor e revisor e a commita, como
+   uma issue de série.
 
 **Sem spec.**
 
@@ -114,7 +115,7 @@ Nenhuma.
 Projeto novo, subsistema novo, mudança que altera como as peças se encaixam ou mexe em
 interface da qual outras coisas dependem.
 
-- Aí sim: `/anti-vibe:spec` → `/anti-vibe:break` → `/anti-vibe:issue` em cada issue.
+- Aí sim: `/anti-vibe:spec` → `/anti-vibe:break`, que inicia a esteira sobre as issues.
 
 ## Regras
 
