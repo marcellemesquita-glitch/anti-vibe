@@ -1,7 +1,7 @@
 ---
 name: auditor
 description: Roda o auditor do fluxo com prova — o conferidor mecânico que diz se uma issue ou uma série está alinhada (cada critério de aceite tem teste com o código dele e o teste passou, suposições e perguntas fechadas, seções presentes, escopo e regras por script). Use quando a pessoa pedir para auditar uma issue ou série, perguntar "qual critério não tem teste?", "o que estamos assumindo?", "o que falta de teste manual?", ou quiser registrar que um teste manual foi feito.
-argument-hint: issue <id> | serie <série> | suposicoes | regras | licao ... | confirmar <id> <CA-...> --por <nome>
+argument-hint: issue <id> | serie <série> | antes <id> | suposicoes | regras | licao ... | confirmar <id> <CA-...> --por <nome>
 ---
 
 # Auditor — a prova que não depende de leitura
@@ -18,6 +18,7 @@ ambiente:
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" issue <id|caminho> [--sem-rodar] [--json]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" serie <série> [--sem-rodar] [--json]
+node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" antes <id|caminho> [--json]
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" suposicoes
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" regras
 node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" licao listar
@@ -32,6 +33,7 @@ node "${CLAUDE_PLUGIN_ROOT}/auditor/auditor.mjs" confirmar <id> <CA-...> --por <
 | Esta issue está alinhada? | `issue S1-02` |
 | Qual critério não tem teste? | `issue S1-02` ou `serie S1` |
 | Posso arquivar a spec? | `serie S1` (tem que dar **alinhada**) |
+| Os testes falham antes do código? | `antes S1-02` (logo depois de escrever os testes) |
 | O que estamos assumindo? | `suposicoes` |
 | O que cada regra acha no projeto hoje? | `regras` |
 | A pessoa fez o teste manual | `confirmar S1-03 CA-S1-04 --por <nome>` |
@@ -54,10 +56,14 @@ Sem configuração no projeto, o auditor usa a padrão do plugin:
 | `comandoTeste` | `npx vitest run {arquivos} --reporter=json --outputFile={saida}` |
 | `aprovadores` | qualquer nome preenchido |
 | `foraDoEscopo` | `pre-desenvolvimento/**` |
+| `configDeTeste` | `vitest.config.*`, `vitest.workspace.*`, `vite.config.*`, `jest.config.*`, `playwright.config.*`, `cypress.config.*`, `.github/workflows/**`, `.gitlab-ci.yml`, `.circleci/**` |
+| `limiteDeTentativas` | `3` |
 
 Para mudar, crie `.claude/auditor.json` no projeto só com os campos que mudam: os dele
-vencem os padrão. Tudo o que o auditor grava (lições, sinais, confirmações) fica no
-projeto, nunca no plugin.
+vencem os padrão. A exceção é `configDeTeste`: a lista do projeto se soma à padrão, nunca a
+substitui, e a configuração do próprio auditor (`.claude/auditor.json` e
+`.claude/auditor-regras.json`) é sempre conferida. Tudo o que o auditor grava (lições,
+sinais, confirmações, registro) fica no projeto, nunca no plugin.
 
 ## Vereditos
 
@@ -89,9 +95,33 @@ projeto, nunca no plugin.
 | checklist incompleto (`CHECKLIST_INCOMPLETO`) | item do Checklist ainda `[ ]` | conclua e marque |
 | regra violada (`REGRA_VIOLADA`) | uma regra por script foi quebrada, com arquivo e linha | siga o "o que fazer" da regra |
 | regra desligada sem motivo (`REGRA_DESLIGADA_SEM_MOTIVO`) | `auditor-desligar` sem o porquê | escreva o motivo |
+| teste alterado (`TESTE_ALTERADO`) | um teste que existia no último commit ou no registro `antes` mudou ou sumiu (nomeado por arquivo e nome) | desfaça; mudar teste existente só com exceção escrita na issue |
+| testes a menos (`TESTES_A_MENOS`) | há menos `it`/`test` do que no último commit | devolva os testes apagados |
+| teste pulado ou isolado (`TESTE_MARCADO`) | linha nova de teste com `.skip`, `.only`, `.todo`, `xit`, `fit`, `xdescribe` ou `fdescribe` | tire a marcação |
+| configuração de teste alterada (`CONFIG_DE_TESTE_ALTERADA`) | configuração do executor de testes, do CI ou do auditor mexida sem estar na issue | desfaça; é decisão de quem aprova |
+| teste que nunca falhou (`TESTE_NUNCA_FALHOU`) | o teste do critério já passava no registro `antes`, sem o código | reescreva o teste para conferir o "Então" |
+| falha antes não registrada (`FALHA_ANTES_NAO_REGISTRADA`) | o critério não tinha teste quando o `antes` rodou | **não trava**; rode o `antes` depois de escrever os testes |
+| precisa de decisão humana (`DECISAO_HUMANA`) | o portão reprovou a issue no limite de tentativas | **não trava**; pare e apresente o que falta à pessoa |
 | escopo não conferido (`ESCOPO_NAO_CONFERIDO`) | nada mudou desde o último commit | **não trava**; para conferir o escopo, rode antes de commitar |
 | teste manual pendente (`TESTE_MANUAL_PENDENTE`) | critério manual sem confirmação | **não trava**; faça o teste e use `confirmar` |
 | issue no formato antigo (`FORMATO_ANTIGO`) | issue sem critérios com código | **não trava**; revise do jeito antigo |
+
+## Antes do código e portão de conclusão
+
+- **`antes <id>`** roda logo depois de escrever os testes e antes de implementar. Ele
+  registra, por critério, se o teste falhou (o certo), já passava ou não existe, e guarda a
+  impressão de todos os testes do projeto. Também torna a issue a **ativa** do portão e
+  recomeça a contagem de tentativas. Saída 0: todos os testes falham, como devem.
+- Depois dele, o auditor acusa o teste que já passava antes (`TESTE_NUNCA_FALHOU`) e
+  qualquer teste mudado desde o registro (`TESTE_ALTERADO`). Sem registro `antes` da
+  issue, essas duas conferências não se aplicam.
+- **O portão**, ligado ao fim do agente executor, roda o auditor sobre a issue ativa. Com
+  problema que trava, ele impede o encerramento e devolve a lista do que falta. Cada
+  reprovação conta uma tentativa; no limite (`limiteDeTentativas`), ele deixa parar com o
+  aviso de que a issue precisa de decisão humana. Rodar o auditor à mão não conta
+  tentativa.
+- O registro fica em `auditor-registro.json`, dentro da pasta do git (fora de git, em
+  `.claude/`). Só o auditor o escreve: não edite à mão.
 
 ## Issue avulsa
 

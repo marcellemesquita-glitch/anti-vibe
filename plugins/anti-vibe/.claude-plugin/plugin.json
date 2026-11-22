@@ -1,6 +1,6 @@
 {
   "name": "anti-vibe",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Fluxo anti-vibe com esteira automática: triagem, spec, issues, testes antes do código, auditor contra trapaça e revisão independente.",
   "author": {
     "name": "Marcelle Mesquita"

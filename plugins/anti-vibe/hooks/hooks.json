@@ -1,5 +1,5 @@
 {
-  "description": "Ganchos do anti-vibe: regras no início da sessão e portão de conclusão.",
+  "description": "Ganchos do anti-vibe: regras e estado do trabalho no início da sessão; portão de conclusão do diagnóstico e do executor.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/sessao.mjs"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/sessao.mjs"
+            ],
             "timeout": 30
           }
         ]
@@ -20,21 +22,25 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/portao.mjs"],
-            "timeout": 30
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/portao.mjs"
+            ],
+            "timeout": 600
           }
         ]
       }
     ],
     "SubagentStop": [
       {
-        "matcher": "^anti-vibe:diagnostico$",
+        "matcher": "^anti-vibe:(diagnostico|executor)$",
         "hooks": [
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/portao.mjs"],
-            "timeout": 30
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/portao.mjs"
+            ],
+            "timeout": 600
           }
         ]
       }
