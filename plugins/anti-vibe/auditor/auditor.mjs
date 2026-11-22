@@ -166,6 +166,8 @@ export function lerIssue(caminho) {
     texto: bruto,
     titulo,
     serie: serieDaIssue(caminho),
+    // Issue avulsa: combinada na triagem, sem spec; os critérios dela bastam.
+    avulsa: semAcento((/^\*\*Tipo:\*\*\s*(.+)$/m.exec(texto) || [])[1] || '') === 'avulsa',
     formatoAntigo: secCriterios === null,
     criterios,
     roteiros,
@@ -581,9 +583,11 @@ export function auditarIssue({ raiz, cfg, caminho, testes, resultados, erroDosTe
   secoesAusentes(issue, rel, problemas)
   registrosAbertos(issue, problemas)
 
+  // A avulsa só dispensa a spec quando a série não tem spec: declarar "Avulsa" numa
+  // série que tem spec não tira os critérios da conferência com ela.
   const spec = issue.serie ? acharSpec(raiz, cfg, issue.serie) : null
   const naSpec = new Set(spec ? spec.criterios.map((c) => c.codigo) : [])
-  if (!spec) {
+  if (!spec && !issue.avulsa) {
     problemas.push(
       problema(
         'SPEC_NAO_ENCONTRADA',
@@ -769,10 +773,14 @@ export function executarSerie(raiz, cfg, serie, { semRodar = false } = {}) {
   if (serieAntiga) {
     return { serie, problemas, issues: relatorios, veredito: 'formato antigo', saida: SAIDA.ALINHADA }
   }
+  // Série só de issues avulsas não tem spec, e tudo bem.
+  const serieAvulsa = issues.length > 0 && issues.every((i) => i.avulsa)
   if (!spec) {
-    problemas.push(
-      problema('SPEC_NAO_ENCONTRADA', serie, 'nenhuma spec com esta série foi encontrada', 'confira a linha "> série:" da spec')
-    )
+    if (!serieAvulsa) {
+      problemas.push(
+        problema('SPEC_NAO_ENCONTRADA', serie, 'nenhuma spec com esta série foi encontrada', 'confira a linha "> série:" da spec')
+      )
+    }
   } else {
     const relSpec = path.relative(raiz, spec.caminho).split(path.sep).join('/')
     secoesAusentes(spec, relSpec, problemas)
