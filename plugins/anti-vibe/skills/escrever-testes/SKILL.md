@@ -43,7 +43,12 @@ leia as seções **Critérios de aceite** e **Prova**.
    ```typescript
    it('CA-S1-01: avisa quando o e-mail já está cadastrado', async () => { ... })
    ```
-   Código só no `describe` não conta: o auditor lê o nome do teste.
+   Em Python (pytest), o código vai no nome da função, com `_` no lugar de `-`:
+   ```python
+   def test_CA_S1_01_avisa_quando_o_email_ja_esta_cadastrado(): ...
+   ```
+   Código só no `describe` (ou só na `class Test...`) não conta: o auditor lê o nome do
+   teste.
 3. O teste confere **o resultado descrito no critério** (o "Então"), não o formato do
    código.
 4. Siga o padrão de testes que o projeto já usa (ferramenta, pastas, preparação e limpeza

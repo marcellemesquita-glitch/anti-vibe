@@ -1,7 +1,7 @@
 ---
 name: issue
-description: Executa o fluxo completo de uma issue com os papéis separados — planejador → escritor de testes → executor → revisildo — a partir do identificador dela, e move a issue para as concluídas quando o auditor der "alinhada". Use quando a pessoa disser só o identificador (ex.: "issue S1-01", "/anti-vibe:issue S1-01").
-argument-hint: <id da issue>
+description: "Executa o fluxo completo de uma issue com os papéis separados — planejador → escritor de testes → executor → revisildo — a partir do identificador dela, e move a issue para as concluídas quando o auditor der \"alinhada\". Use quando a pessoa disser só o identificador (ex.: \"issue S1-01\", \"/anti-vibe:issue S1-01\")."
+argument-hint: "<id da issue>"
 ---
 
 # Fluxo completo de issue (planejador → escritor de testes → executor → revisildo)

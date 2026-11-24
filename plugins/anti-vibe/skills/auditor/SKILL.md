@@ -61,11 +61,12 @@ Sem configuração no projeto, o auditor usa a padrão do plugin:
 | `pastaSpecsArquivadas` | `docs/specs-arquivadas` |
 | `arquivoLicoes` | `pre-desenvolvimento/licoes.md` |
 | `pastasTestes` | `src`, `test`, `tests`, `__tests__` |
-| `sufixosTeste` | `.test.ts`, `.test.tsx`, `.test.js`, `.test.jsx`, `.test.mjs`, `.spec.ts`, `.spec.tsx`, `.spec.js` |
+| `sufixosTeste` | `.test.ts`, `.test.tsx`, `.test.js`, `.test.jsx`, `.test.mjs`, `.spec.ts`, `.spec.tsx`, `.spec.js`, `.py` (só `test_*.py` e `*_test.py`) |
 | `comandoTeste` | `npx vitest run {arquivos} --reporter=json --outputFile={saida}` |
+| `comandoTestePython` | `python -B -m pytest {arquivos} -q -p no:cacheprovider -o junit_family=xunit1 --junitxml={saida}` |
 | `aprovadores` | qualquer nome preenchido |
 | `foraDoEscopo` | `pre-desenvolvimento/**` |
-| `configDeTeste` | `vitest.config.*`, `vitest.workspace.*`, `vite.config.*`, `jest.config.*`, `playwright.config.*`, `cypress.config.*`, `.github/workflows/**`, `.gitlab-ci.yml`, `.circleci/**` |
+| `configDeTeste` | `vitest.config.*`, `vitest.workspace.*`, `vite.config.*`, `jest.config.*`, `playwright.config.*`, `cypress.config.*`, `pytest.ini`, `.pytest.ini`, `pytest.toml`, `.pytest.toml`, `tox.ini`, `**/conftest.py`, `.github/workflows/**`, `.gitlab-ci.yml`, `.circleci/**` |
 | `limiteDeTentativas` | `3` |
 
 Para mudar, crie `.claude/auditor.json` no projeto só com os campos que mudam: os dele
@@ -247,7 +248,29 @@ versionado, para todo mundo do projeto receber, e **só o auditor escreve nele**
 
 ## Limites
 
-- Roda só testes do Vitest, nas `pastasTestes` da configuração. Roteiro de tela não conta
-  como prova automática: critério que só se confere pela tela é de prova `manual`.
+- Roda testes do Vitest e do pytest, nas `pastasTestes` da configuração. Roteiro de tela
+  não conta como prova automática: critério que só se confere pela tela é de prova `manual`.
+- Em Python (`.py`, já nos `sufixosTeste` padrão):
+  - só contam `test_*.py` e `*_test.py`;
+  - o teste é a função `def test_...` no topo do arquivo ou direto no corpo de uma
+    `class Test...` (ou de uma classe de `unittest.TestCase`), que faz o papel do
+    `describe`; `def test_` dentro de `if`, de função ou de outra classe não é teste;
+  - o código do critério vai no nome da função, com `_` no lugar de `-`
+    (`def test_CA_S1_01_...`), que o auditor lê como `CA-S1-01`; o que o `parametrize`
+    acrescenta entre colchetes não conta;
+  - o resultado do pytest vale só para os testes lidos no arquivo, conferidos pelo nome,
+    pelo arquivo e pela linha que o pytest informa (por isso o `-o junit_family=xunit1`
+    no comando): teste lido sem resultado próprio deixa o critério sem prova;
+  - contam como marcação (teste pulado): `@pytest.mark.skip`, `skipif`, `xfail`,
+    `@unittest.skip`, `pytestmark = ...mark.skip` e `__test__ = False` (no topo do
+    arquivo ou na classe), reatribuir ou apagar com `del` o nome de um teste, e repetir o
+    nome (só a última definição roda);
+  - linha nova fora dos testes que mexe no próprio pytest também é marcação: importar
+    `_pytest` ou `pluggy`, `pytest_plugins = ...`, atribuir a algo de `pytest`, `_pytest`
+    ou `pluggy` e trocar o `__code__` de uma função;
+  - se `python` não for o Python certo, troque `comandoTestePython`: `python3 -B -m pytest
+    ...` (Linux e macOS), `py -B -m pytest ...` (Windows) ou o Python do ambiente virtual
+    do projeto (`.venv/Scripts/python -B -m pytest ...` no Windows,
+    `.venv/bin/python -B -m pytest ...` nos outros).
 - Vale o código no nome do `it`/`test`. Código só no `describe` não conta.
 - Roda apenas os arquivos de teste que carregam os códigos da issue, não a suíte inteira.

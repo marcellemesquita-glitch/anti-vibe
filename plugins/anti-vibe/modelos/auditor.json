@@ -4,8 +4,9 @@
   "pastaSpecsArquivadas": "docs/specs-arquivadas",
   "arquivoLicoes": "pre-desenvolvimento/licoes.md",
   "pastasTestes": ["src", "test", "tests", "__tests__"],
-  "sufixosTeste": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".test.mjs", ".spec.ts", ".spec.tsx", ".spec.js"],
+  "sufixosTeste": [".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".test.mjs", ".spec.ts", ".spec.tsx", ".spec.js", ".py"],
   "comandoTeste": "npx vitest run {arquivos} --reporter=json --outputFile={saida}",
+  "comandoTestePython": "python -B -m pytest {arquivos} -q -p no:cacheprovider -o junit_family=xunit1 --junitxml={saida}",
   "aprovadores": [],
   "foraDoEscopo": ["pre-desenvolvimento/**"],
   "limiteDeTentativas": 3

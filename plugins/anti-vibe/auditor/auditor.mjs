@@ -32,8 +32,11 @@ export const CONFIG_PADRAO = {
   pastaSpecs: 'pre-desenvolvimento',
   pastaSpecsArquivadas: 'docs/specs-arquivadas',
   pastasTestes: ['src', 'test', 'tests', '__tests__'],
-  sufixosTeste: ['.test.ts', '.test.tsx', '.test.js', '.test.jsx', '.test.mjs', '.spec.ts', '.spec.tsx', '.spec.js'],
+  sufixosTeste: ['.test.ts', '.test.tsx', '.test.js', '.test.jsx', '.test.mjs', '.spec.ts', '.spec.tsx', '.spec.js', '.py'],
   comandoTeste: 'npx vitest run {arquivos} --reporter=json --outputFile={saida}',
+  // Testes em Python (arquivos `.py` nas pastasTestes, com nome test_*.py ou *_test.py)
+  // rodam com este comando, que grava o resultado em JUnit XML em {saida}.
+  comandoTestePython: 'python -B -m pytest {arquivos} -q -p no:cacheprovider -o junit_family=xunit1 --junitxml={saida}',
   // Quem pode aprovar exceção. Lista vazia = qualquer nome preenchido.
   aprovadores: [],
   // Arquivos que nunca contam como "fora da issue" (documentos do próprio fluxo).
@@ -48,6 +51,12 @@ export const CONFIG_PADRAO = {
     'jest.config.*',
     'playwright.config.*',
     'cypress.config.*',
+    'pytest.ini',
+    'tox.ini',
+    '.pytest.ini',
+    'pytest.toml',
+    '.pytest.toml',
+    '**/conftest.py',
     '.github/workflows/**',
     '.gitlab-ci.yml',
     '.circleci/**',
@@ -300,6 +309,23 @@ export function acharIssue(raiz, cfg, idOuCaminho) {
 
 // ------------------------------------------------------- códigos nos testes
 
+// Python: um sufixo `.py` só vale para test_*.py e *_test.py (conftest.py e
+// __init__.py ficam de fora, como no pytest).
+function ePython(arquivo) {
+  return arquivo.endsWith('.py')
+}
+
+function nomeDeTeste(nome, cfg) {
+  if (!cfg.sufixosTeste.some((s) => nome.endsWith(s))) return false
+  return !ePython(nome) || /^test_.*\.py$|_test\.py$/.test(nome)
+}
+
+// Em Python o código vai no nome da função com `_` no lugar de `-`
+// (def test_CA_S1_01_avisa...): aqui volta a ser CA-S1-01.
+export function normalizarCodigos(texto) {
+  return texto.replace(/CA_([A-Z0-9]+)_(\d+)/g, 'CA-$1-$2')
+}
+
 function arquivosDeTeste(raiz, cfg) {
   const achados = []
   const andar = (pasta) => {
@@ -307,7 +333,7 @@ function arquivosDeTeste(raiz, cfg) {
     for (const e of fs.readdirSync(pasta, { withFileTypes: true })) {
       const caminho = path.join(pasta, e.name)
       if (e.isDirectory()) andar(caminho)
-      else if (cfg.sufixosTeste.some((s) => e.name.endsWith(s))) achados.push(caminho)
+      else if (nomeDeTeste(e.name, cfg)) achados.push(caminho)
     }
   }
   cfg.pastasTestes.forEach((p) => andar(path.join(raiz, p)))
@@ -320,6 +346,15 @@ export function codigosNosTestes(raiz, cfg) {
   const mapa = new Map()
   const re = /\b(x?it|test)((?:\.\w+)*)\s*\(\s*(["'`])((?:\\.|(?!\3).)*)\3/g
   for (const arquivo of arquivosDeTeste(raiz, cfg)) {
+    if (ePython(arquivo)) {
+      for (const t of lerTestesPython(ler(arquivo)).testes) {
+        for (const codigo of new Set(t.nome.match(RE_CODIGO_CA) || [])) {
+          if (!mapa.has(codigo)) mapa.set(codigo, [])
+          mapa.get(codigo).push({ arquivo: path.relative(raiz, arquivo).split(path.sep).join('/'), linha: t.linha, titulo: t.nome, pulado: t.pulado })
+        }
+      }
+      continue
+    }
     ler(arquivo)
       .split('\n')
       .forEach((linha, i) => {
@@ -421,7 +456,8 @@ function aberturaDeTeste(linhas, i) {
 // - preparacao: as linhas fora de qualquer teste (imports, funções de apoio,
 //   before/after), sem as que só fecham bloco;
 // - marcacoes: [{ nome, marcacao, linha }] de testes e describes.
-export function lerTestes(texto) {
+export function lerTestes(texto, arquivo = '') {
+  if (ePython(arquivo)) return lerTestesPython(texto)
   const linhas = texto.replace(/\r\n/g, '\n').split('\n')
   const testes = []
   const marcacoes = []
@@ -450,19 +486,195 @@ export function lerTestes(texto) {
   return { testes, preparacao, marcacoes }
 }
 
-export function eArquivoDeTeste(rel, cfg) {
-  return cfg.pastasTestes.some((p) => rel.startsWith(`${p}/`)) && cfg.sufixosTeste.some((s) => rel.endsWith(s))
+// Leitura de um arquivo de teste em Python, no mesmo formato de lerTestes:
+// `class Test...` (ou uma classe de `unittest.TestCase`) faz o papel do describe e
+// `def test_...` (ou `async def`) no topo do arquivo ou direto no corpo dessa classe é um
+// teste; `def test_` dentro de `if`, de função ou de classe que o pytest não coleta não é
+// teste. O bloco vai até a próxima linha com indentação menor ou igual (texto entre aspas
+// triplas não conta). Contam como marcação, e o teste fica pulado:
+// - os decoradores `@pytest.mark.skip`, `skipif`, `xfail` e `@unittest.skip...`, também
+//   escritos em várias linhas;
+// - `pytestmark = ...mark.skip` e `__test__ = False` no topo do arquivo ou no corpo da
+//   classe, que valem para todos os testes dali (cada um acusado na linha da marcação);
+// - reatribuir (`test_x = ...`) ou apagar (`del test_x`) o nome de um teste;
+// - repetir o nome: em Python vale só a última definição, e as anteriores não rodam.
+// O nome do teste sai com os códigos normalizados (CA_S1_01 → CA-S1-01).
+const RE_MARCA_PYTHON = /^@(?:(?:\w+\.)?mark\.(skip|skipif|xfail)|(?:unittest\.)?(skip\w*|expectedFailure))\b/
+const RE_MARCA_DO_BLOCO = /^(?:pytestmark\s*=[\s\S]*?\bmark\.(skip|skipif|xfail)\b|(__test__)\s*=\s*False\b)/
+// Linha fora dos testes que mexe no próprio pytest (troca como ele roda ou relata um
+// teste): importar as partes internas, carregar plugin, atribuir a algo do pytest ou
+// trocar o código de uma função.
+const RE_MEXE_NO_PYTEST =
+  /^(?:(?:from|import)\s+(?:_pytest|pluggy)\b|pytest_plugins\s*=|(?:_pytest|pytest|pluggy)\.[\w.]+\s*=(?!=)|setattr\(\s*(?:_pytest|pytest|pluggy)\b)|\.__code__\s*=(?!=)/
+const RE_TIRA_TESTE =/^(?:(test\w*)\s*(?::[^=]*)?=(?!=)|del\s+(test\w*))/
+
+export function lerTestesPython(texto) {
+  const linhas = texto.replace(/\r\n/g, '\n').split('\n')
+  const testes = []
+  const marcacoes = []
+  const dentro = new Array(linhas.length).fill(false)
+  const indent = (l) => l.match(/^\s*/)[0].replace(/\t/g, '    ').length
+  const semComentario = (l) => l.replace(/#.*$/, '')
+  const saldo = (l) => (semComentario(l).match(/[([{]/g) || []).length - (semComentario(l).match(/[)\]}]/g) || []).length
+
+  // Linhas que começam dentro de um texto entre aspas triplas.
+  const emTexto = new Array(linhas.length).fill(false)
+  let aberto = null
+  linhas.forEach((l, k) => {
+    emTexto[k] = aberto !== null
+    let resto = l
+    for (;;) {
+      if (aberto) {
+        const p = resto.indexOf(aberto)
+        if (p < 0) break
+        resto = resto.slice(p + 3)
+        aberto = null
+      } else {
+        const m = /"""|'''/.exec(semComentario(resto))
+        if (!m) break
+        aberto = m[0]
+        resto = resto.slice(m.index + 3)
+      }
+    }
+  })
+
+  // Fim de uma instrução que continua nas linhas de baixo enquanto há parêntese aberto.
+  const fimDaInstrucao = (k) => {
+    let fim = k
+    let conta = saldo(linhas[k])
+    while (conta > 0 && fim + 1 < linhas.length) conta += saldo(linhas[++fim])
+    return fim
+  }
+  const fimDoBlocoPython = (inicio) => {
+    const base = indent(linhas[inicio])
+    // A assinatura pode continuar nas linhas de baixo; `def test_a(): assert True` numa
+    // linha só termina nela, porque a linha seguinte já volta à indentação de base.
+    const assinatura = fimDaInstrucao(inicio)
+    let fim = assinatura
+    for (let k = assinatura + 1; k < linhas.length; k++) {
+      if (!linhas[k].trim() || emTexto[k]) {
+        if (emTexto[k]) fim = k
+        continue
+      }
+      if (indent(linhas[k]) <= base) break
+      fim = k
+    }
+    return fim
+  }
+  // Decoradores logo acima da linha i, inclusive os escritos em várias linhas.
+  const decoradores = (i) => {
+    const lista = []
+    let k = i - 1
+    while (k >= 0) {
+      let conta = 0
+      let j = k
+      while (j >= 0) {
+        conta += saldo(linhas[j])
+        if (conta >= 0) break
+        j--
+      }
+      if (j < 0 || !/^\s*@/.test(linhas[j])) break
+      lista.unshift({ texto: linhas.slice(j, k + 1).map((l) => l.trim()).join(' '), linha: j })
+      k = j - 1
+    }
+    return lista
+  }
+  // Marcações de bloco (pytestmark, __test__) entre as linhas inicio e fim, na indentação nivel.
+  const marcasDoBloco = (inicio, fim, nivel) => {
+    const lista = []
+    for (let k = inicio; k <= fim; k++) {
+      if (emTexto[k] || indent(linhas[k]) !== nivel || !/^\s*(pytestmark|__test__)\s*=/.test(linhas[k])) continue
+      const instrucao = linhas.slice(k, fimDaInstrucao(k) + 1).map((l) => l.trim()).join(' ')
+      const m = RE_MARCA_DO_BLOCO.exec(instrucao)
+      if (m) lista.push({ marcacao: m[1] || '__test__ = False', linha: k + 1 })
+    }
+    return lista
+  }
+
+  const doArquivo = marcasDoBloco(0, linhas.length - 1, 0)
+  const classes = []
+  const tirados = []
+  for (let i = 0; i < linhas.length; i++) {
+    while (classes.length && i > classes[classes.length - 1].fim) classes.pop()
+    if (emTexto[i]) continue
+    const nivel = classes.length ? classes[classes.length - 1].corpo : 0
+    const tira = RE_TIRA_TESTE.exec(linhas[i].trim())
+    if (tira && indent(linhas[i]) === nivel) {
+      tirados.push({ escopo: classes.map((c) => c.nome).join(' › '), nome: normalizarCodigos(tira[1] || tira[2]), marcacao: tira[1] ? 'reatribuição do nome' : 'del', linha: i + 1 })
+      continue
+    }
+    const classe = /^\s*class\s+(\w+)\s*(?:\(([^)]*)\))?\s*:/.exec(linhas[i])
+    const funcao = /^\s*(?:async\s+)?def\s+(test\w*)\s*\(/.exec(linhas[i])
+    if (classe && !/^Test/.test(classe[1]) && !/TestCase\b/.test(classe[2] || '')) continue
+    if (!classe && !funcao) continue
+    // Fora do topo do arquivo ou do corpo de uma classe de teste, o pytest não coleta.
+    if (indent(linhas[i]) !== nivel) continue
+    const decs = decoradores(i)
+    const marca = decs.map((d) => RE_MARCA_PYTHON.exec(d.texto)).find(Boolean)
+    const nome = normalizarCodigos((classe || funcao)[1])
+    const fim = fimDoBlocoPython(i)
+    const linhaDeMarca = marca ? decs.find((d) => RE_MARCA_PYTHON.test(d.texto)).linha + 1 : null
+    if (marca) marcacoes.push({ nome, marcacao: marca[1] || marca[2], linha: linhaDeMarca })
+    const pulado = Boolean(marca) || classes.some((c) => c.pulado)
+    if (classe) {
+      // O corpo da classe fica na indentação da primeira linha de código depois dela.
+      const primeira = linhas.slice(i + 1, fim + 1).find((l) => l.trim() && !/^\s*#/.test(l))
+      const corpo = primeira ? indent(primeira) : indent(linhas[i]) + 4
+      const daClasse = marcasDoBloco(i + 1, fim, corpo)
+      classes.push({ nome, fim, corpo, pulado: pulado || daClasse.length > 0, marcas: daClasse })
+      continue
+    }
+    const herdadas = [...doArquivo, ...classes.flatMap((c) => c.marcas)]
+    for (const h of herdadas) marcacoes.push({ nome, marcacao: h.marcacao, linha: h.linha })
+    const caminho = [...classes.map((c) => c.nome), nome].join(' › ')
+    const inicio = decs.length ? decs[0].linha : i
+    const corpo = linhas.slice(inicio, fim + 1).map((l) => l.trim()).filter(Boolean)
+    for (let k = inicio; k <= fim; k++) dentro[k] = true
+    testes.push({ nome, caminho, inicio: inicio + 1, linha: i + 1, resumo: resumo(corpo.join('\n')), pulado: pulado || herdadas.length > 0 })
+    i = fim
+  }
+
+  // Nome repetido no mesmo lugar: só a última definição roda.
+  const vistos = new Map()
+  testes.forEach((t, k) => {
+    const n = (vistos.get(t.caminho) || 0) + 1
+    vistos.set(t.caminho, n)
+    t.chave = n > 1 ? `${t.caminho} #${n}` : t.caminho
+    const depois = testes.slice(k + 1).find((o) => o.caminho === t.caminho)
+    if (depois) {
+      t.pulado = true
+      marcacoes.push({ nome: t.nome, marcacao: 'nome repetido', linha: depois.linha })
+    }
+  })
+  // Nome reatribuído ou apagado depois da definição.
+  for (const tirado of tirados) {
+    for (const t of testes) {
+      const escopo = t.caminho.split(' › ').slice(0, -1).join(' › ')
+      if (t.nome !== tirado.nome || escopo !== tirado.escopo || t.linha > tirado.linha) continue
+      t.pulado = true
+      marcacoes.push({ nome: t.nome, marcacao: tirado.marcacao, linha: tirado.linha })
+    }
+  }
+  linhas.forEach((l, k) => {
+    if (!dentro[k] && !emTexto[k] && RE_MEXE_NO_PYTEST.test(l.trim())) marcacoes.push({ nome: '(preparação)', marcacao: 'mudança no pytest', linha: k + 1 })
+  })
+  const preparacao = linhas.filter((_, k) => !dentro[k]).map((l) => l.trim()).filter((l) => l && !RE_SO_FECHA.test(l))
+  return { testes: testes.map(({ chave, nome, caminho, inicio, linha, resumo, pulado }) => ({ chave, nome, caminho, inicio, linha, resumo, pulado })), preparacao, marcacoes }
 }
 
-function impressaoDoArquivo(texto) {
-  const { testes, preparacao } = lerTestes(texto)
+export function eArquivoDeTeste(rel, cfg) {
+  return cfg.pastasTestes.some((p) => rel.startsWith(`${p}/`)) && nomeDeTeste(path.posix.basename(rel), cfg)
+}
+
+function impressaoDoArquivo(texto, arquivo) {
+  const { testes, preparacao } = lerTestes(texto, arquivo)
   return { testes: testes.map(({ chave, nome, caminho, resumo }) => ({ chave, nome, caminho, resumo })), preparacao }
 }
 
 // Impressão de todos os testes de agora: mapa arquivo → { testes, preparacao }.
 export function impressaoDosTestes(raiz, cfg) {
   const mapa = {}
-  for (const arquivo of arquivosDeTeste(raiz, cfg)) mapa[relativoAoProjeto(raiz, arquivo)] = impressaoDoArquivo(ler(arquivo))
+  for (const arquivo of arquivosDeTeste(raiz, cfg)) mapa[relativoAoProjeto(raiz, arquivo)] = impressaoDoArquivo(ler(arquivo), arquivo)
   return mapa
 }
 
@@ -473,7 +685,7 @@ export function impressaoDoCommit(raiz, cfg, commit = 'HEAD') {
   const mapa = {}
   for (const rel of lista.split('\n').filter((a) => a && eArquivoDeTeste(a, cfg))) {
     const texto = git(raiz, ['show', `${commit}:./${rel}`])
-    if (texto !== null) mapa[rel] = impressaoDoArquivo(texto)
+    if (texto !== null) mapa[rel] = impressaoDoArquivo(texto, rel)
   }
   return mapa
 }
@@ -500,10 +712,49 @@ export function resultadosDoJson(json) {
   return mapa
 }
 
-export function rodarTestes(raiz, cfg, arquivos) {
-  if (arquivos.length === 0) return { resultados: new Map() }
-  const saida = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'auditor-')), 'resultado.json')
-  const comando = cfg.comandoTeste
+// Resultado do pytest (JUnit XML) → mapa código → [status], no vocabulário do Vitest
+// (passed, failed, skipped). O código vem só do nome da função, normalizado: o que o
+// parametrize acrescenta entre colchetes não conta. `esperados` são os testes lidos nos
+// arquivos ({ nome, arquivo, inicio, linha }). Um resultado só vale para o teste lido de
+// mesmo nome, no mesmo arquivo e, quando o pytest informa a linha (formato xunit1), com a
+// linha entre o primeiro decorador e o `def`: assim uma função trocada por outra (por
+// `globals()`, `setattr`, isca...) não vale pelo teste lido. Resultado que não é de nenhum
+// teste lido não conta, e teste lido sem resultado fica como "não rodou".
+export function resultadosDoJunit(xml, esperados = []) {
+  const mapa = new Map()
+  const acrescentar = (nome, status) => {
+    for (const codigo of new Set(nome.match(RE_CODIGO_CA) || [])) {
+      if (!mapa.has(codigo)) mapa.set(codigo, [])
+      mapa.get(codigo).push(status)
+    }
+  }
+  const atributo = (attrs, nome) => (new RegExp(`\\b${nome}="([^"]*)"`).exec(attrs) || [])[1]
+  const mesmoArquivo = (a, b) => a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
+  const rodaram = new Set()
+  const re = /<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g
+  let m
+  while ((m = re.exec(xml))) {
+    const nome = normalizarCodigos((atributo(m[1], 'name') || '').replace(/\[[\s\S]*$/, ''))
+    const arquivo = atributo(m[1], 'file')
+    const linha = atributo(m[1], 'line')
+    const dono = esperados.find(
+      (e) =>
+        e.nome === nome &&
+        (arquivo === undefined || mesmoArquivo(arquivo.replace(/\\/g, '/'), e.arquivo)) &&
+        (linha === undefined || (Number(linha) + 1 >= e.inicio && Number(linha) + 1 <= e.linha))
+    )
+    if (!dono) continue
+    rodaram.add(dono)
+    const corpo = m[3] || ''
+    acrescentar(nome, /<(failure|error)\b/.test(corpo) ? 'failed' : /<skipped\b/.test(corpo) ? 'skipped' : 'passed')
+  }
+  for (const e of esperados) if (!rodaram.has(e)) acrescentar(e.nome, 'não rodou')
+  return mapa
+}
+
+function rodarUmComando(raiz, modelo, arquivos, nomeDaSaida, interpretar) {
+  const saida = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'auditor-')), nomeDaSaida)
+  const comando = modelo
     .replace('{arquivos}', arquivos.map((a) => `"${a.split(path.sep).join('/')}"`).join(' '))
     .replace('{saida}', `"${saida}"`)
   const proc = spawnSync(comando, { cwd: raiz, shell: true, encoding: 'utf8' })
@@ -511,7 +762,27 @@ export function rodarTestes(raiz, cfg, arquivos) {
     const fim = `${proc.stdout || ''}\n${proc.stderr || ''}`.trim().split('\n').slice(-15).join('\n')
     return { resultados: new Map(), erro: fim || 'o comando de teste não gerou resultado' }
   }
-  return { resultados: resultadosDoJson(JSON.parse(ler(saida))) }
+  return { resultados: interpretar(ler(saida)) }
+}
+
+export function rodarTestes(raiz, cfg, arquivos) {
+  if (arquivos.length === 0) return { resultados: new Map() }
+  const python = arquivos.filter(ePython)
+  const outros = arquivos.filter((a) => !ePython(a))
+  const partes = []
+  if (outros.length) partes.push(rodarUmComando(raiz, cfg.comandoTeste, outros, 'resultado.json', (t) => resultadosDoJson(JSON.parse(t))))
+  if (python.length) {
+    const esperados = python
+      .flatMap((a) => lerTestesPython(ler(a)).testes.map((t) => ({ ...t, arquivo: relativoAoProjeto(raiz, path.resolve(raiz, a)) })))
+      .filter((t) => (t.nome.match(RE_CODIGO_CA) || []).length)
+    partes.push(rodarUmComando(raiz, cfg.comandoTestePython, python, 'resultado.xml', (xml) => resultadosDoJunit(xml, esperados)))
+  }
+  const resultados = new Map()
+  for (const parte of partes) {
+    for (const [codigo, lista] of parte.resultados) resultados.set(codigo, [...(resultados.get(codigo) || []), ...lista])
+  }
+  const erro = partes.map((p) => p.erro).filter(Boolean).join('\n')
+  return erro ? { resultados, erro } : { resultados }
 }
 
 // ------------------------------------------------- escopo e regras por script
@@ -849,7 +1120,7 @@ function conferirTrapaca({ raiz, cfg, issue, caminho, problemas }) {
     if (m.estado === 'D' || !eArquivoDeTeste(m.arquivo, cfg)) continue
     const arquivo = path.join(raiz, m.arquivo)
     if (!fs.existsSync(arquivo)) continue
-    for (const t of lerTestes(ler(arquivo)).marcacoes) {
+    for (const t of lerTestes(ler(arquivo), arquivo).marcacoes) {
       if (m.linhas && !m.linhas.has(t.linha)) continue
       problemas.push(
         problema(
@@ -1056,7 +1327,7 @@ export function auditarIssue({ raiz, cfg, caminho, testes, resultados, erroDosTe
           'CRITERIO_SEM_TESTE',
           c.codigo,
           c.texto,
-          `escreva um teste com "${c.codigo}" no nome do it/test`
+          `escreva um teste com "${c.codigo}" no nome do it/test (em Python, test_${c.codigo.replace(/-/g, '_')}_...)`
         )
       )
       continue
@@ -1444,7 +1715,7 @@ function travasDoEscritor(raiz, cfg, caminho) {
   const rel = registrarAntes(raiz, cfg, caminho)
   if (rel.erro) return [problema('PORTAO_SEM_CONFERENCIA', path.basename(caminho), rel.erro, 'renomeie a issue com o identificador na frente')]
   return [
-    ...rel.semTeste.map((c) => problema('CRITERIO_SEM_TESTE', c, 'o critério automático não tem teste', `escreva um teste com "${c}" no nome do it/test`)),
+    ...rel.semTeste.map((c) => problema('CRITERIO_SEM_TESTE', c, 'o critério automático não tem teste', `escreva um teste com "${c}" no nome do it/test (em Python, test_${c.replace(/-/g, '_')}_...)`)),
     ...rel.passaram.map((c) =>
       problema('TESTE_NUNCA_FALHOU', c, 'o teste já passa sem o código: ele não prova o critério', 'reescreva o teste para conferir o "Então" do critério')
     ),
