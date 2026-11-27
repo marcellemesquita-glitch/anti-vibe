@@ -20,7 +20,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { chamadoDireto, lerEntrada } from './comum.mjs'
+import { chamadoDireto, lerEntrada, raizDoProjeto } from './comum.mjs'
 
 export const AGENTE_DIAGNOSTICO = 'anti-vibe:diagnostico'
 export const AGENTE_EXECUTOR = 'anti-vibe:executor'
@@ -48,7 +48,8 @@ function resposta(entrada, { libera, mensagem }) {
 export async function decidirPapel(entrada) {
   if (entrada.hook_event_name === 'PreToolUse' && entrada.tool_name !== 'SubagentHandback') return { codigo: 0 }
   // A pasta do projeto vem antes da pasta atual do agente, que ele pode ter mudado.
-  const raiz = process.env.CLAUDE_PROJECT_DIR || entrada.cwd || process.cwd()
+  const base = process.env.CLAUDE_PROJECT_DIR || entrada.cwd || process.cwd()
+  const raiz = raizDoProjeto(base, entrada.cwd)
   try {
     const auditor = await import(pathToFileURL(path.join(raizDoPlugin, 'auditor', 'auditor.mjs')).href)
     const papel = entrada.agent_type === AGENTE_ESCRITOR ? 'escritor' : 'executor'

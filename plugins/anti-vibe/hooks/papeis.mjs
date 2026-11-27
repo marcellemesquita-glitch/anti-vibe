@@ -13,7 +13,7 @@
 // limite está registrado na spec.
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { chamadoDireto, lerEntrada } from './comum.mjs'
+import { chamadoDireto, lerEntrada, raizDoProjeto } from './comum.mjs'
 
 const raizDoPlugin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -54,7 +54,8 @@ export async function decidirEdicao(entrada) {
   const alvo = entrada.tool_input?.file_path || entrada.tool_input?.notebook_path
   if (!alvo) return { nega: false }
 
-  const raiz = process.env.CLAUDE_PROJECT_DIR || entrada.cwd || process.cwd()
+  const base = process.env.CLAUDE_PROJECT_DIR || entrada.cwd || process.cwd()
+  const raiz = raizDoProjeto(base, path.resolve(base, alvo))
   const absoluto = path.resolve(raiz, alvo)
   const foraDoProjeto = !dentroDe(raiz, absoluto)
   const rel = normal(path.relative(raiz, absoluto).split(path.sep).join('/'))

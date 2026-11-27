@@ -5,6 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { raizDoProjeto } from './comum.mjs'
 
 const raizDoPlugin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -109,7 +110,7 @@ async function linhasDoEstado(raiz) {
   return linhas
 }
 
-export async function textoDaSessao(raiz = process.env.CLAUDE_PROJECT_DIR || process.cwd()) {
+export async function textoDaSessao(raiz = raizDoProjeto(process.env.CLAUDE_PROJECT_DIR || process.cwd())) {
   const linhas = textoDasRegras()
   try {
     linhas.push(...(await linhasDoEstado(raiz)))
